@@ -1,0 +1,2882 @@
+openapi: 3.1.0
+info:
+  title: dun HTTP API
+  version: "1.0.0-phase9"
+  description: |
+    JSON API for the `dun` backend. The CLI gem and any future integration
+    consume only this surface.
+
+    ## Authentication
+
+    Bearer ApiKey, supplied as `Authorization: Bearer <api_key>`.
+
+    - **Player** keys are issued by `POST /auth/exchange` and accepted on
+      non-admin routes.
+    - **Admin** keys are issued by `POST /admin/auth/exchange` and accepted
+      on `/admin/...` routes.
+
+    A player key presented at an admin endpoint, or vice versa, returns
+    `401 unauthorized`.
+
+    ## Rolling expiry
+
+    Every successful authenticated request slides the key's `expires_at`
+    forward to 90 days from now and refreshes `last_used_at`. A key
+    untouched for 90 days expires and must be re-issued via a fresh
+    magic link.
+
+    ## Error envelope
+
+    Every 4xx / 5xx response uses:
+
+    ```json
+    { "error": { "code": "string_code", "message": "human readable", "retry_after": 30 } }
+    ```
+
+    `retry_after` is present only on rate-limited responses (429).
+
+    ## Request IDs
+
+    Every response echoes `X-Request-Id` (auto-generated if absent). The
+    same ID is included in lograge JSON logs and OpenTelemetry traces.
+
+    ## Game design source of truth
+
+    See [docs/dun Game Design Document.v3.md](dun%20Game%20Design%20Document.v3.md).
+    Section refs like `§17.1` point at that doc.
+
+servers:
+  - url: http://localhost:3000/v1
+    description: Local development
+
+tags:
+  - name: Health
+    description: Unauthenticated liveness check.
+  - name: Player auth
+    description: Magic-link request / exchange and ApiKey management for players.
+  - name: Player servers
+    description: Player-facing server listing + membership.
+  - name: Player profile
+    description: Per-server handle, real name, and profile lookups.
+  - name: Admin auth
+    description: Magic-link request / exchange and ApiKey management for admins.
+  - name: Admin servers
+    description: Server CRUD restricted to administered servers.
+  - name: Admin co-admins
+    description: Manage `ServerAdminship` rows; last-admin invariant enforced.
+  - name: Admin invitations
+    description: Manage invite-kind `ServerAccess` rows on a server.
+  - name: Admin members
+    description: Read-only listing of player memberships on a server.
+  - name: Player worlds
+    description: Player-facing world listing, join, and map/region/ruin reads.
+  - name: Admin worlds
+    description: Admin propose/configure/cancel for worlds on administered servers.
+  - name: Admin world invitations
+    description: Informational invitations attached to a world; do NOT gate admission (server access still rules).
+  - name: Player kingdoms
+    description: Per-kingdom dashboard, building queue, and stockpile reads (§6, §10, §16.4).
+  - name: Player trade
+    description: Caravan dispatch and per-world public trade ledger (§12, §17.2).
+  - name: Player wonders
+    description: Wonder lifecycle (foundation, construction, consecration), repair, and milestones (§14, §16.2).
+  - name: Hall of Fame
+    description: Per-server leaderboard snapshots — Champions, Wreckers, Warlords, Veterans (§17.4).
+  - name: World archive
+    description: Frozen end-of-round state for archived worlds (§16.6).
+  - name: Account
+    description: Player-initiated irreversible account deletion (§17.4).
+
+security: []   # endpoints declare their own security requirements
+
+paths:
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: Liveness check
+      security: []
+      responses:
+        "200":
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ─── Player auth ────────────────────────────────────────────────────────────
+
+  /auth/magic_link:
+    post:
+      operationId: requestPlayerMagicLink
+      tags: [Player auth]
+      summary: Request a player magic-link email
+      description: |
+        Enqueues `MagicLinkMailer#send_link` with `scope: "player"`. The
+        response shape is identical whether or not a `Player` already
+        exists for the email (no enumeration leak).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: alice@example.com
+      responses:
+        "202": { description: Mailer enqueued. }
+        "422":
+          $ref: "#/components/responses/ParamMissing"
+
+  /auth/exchange:
+    post:
+      operationId: exchangePlayerMagicLink
+      tags: [Player auth]
+      summary: Exchange a magic-link token for a player ApiKey
+      description: |
+        Consumes a magic-link token and issues a fresh player-scope
+        `ApiKey`. The raw key is shown **once** in this response; only
+        its SHA-256 digest is persisted.
+
+        On success the service also:
+        1. Find-or-creates the `Player` by email (default name from
+           local-part).
+        2. Iterates every `Server` and creates `ServerMembership` +
+           `PlayerProfile` for any whose `ServerAccess` admits the email
+           (§16.7 union rules).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Raw magic-link token (from email).
+      responses:
+        "201":
+          description: Player ApiKey issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExchangeResponse"
+        "401":
+          description: Token invalid, expired, already consumed, or wrong scope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              examples:
+                invalid_token: { value: { error: { code: invalid_token,    message: "Magic link is invalid" } } }
+                expired:       { value: { error: { code: expired,          message: "Magic link has expired" } } }
+                already:       { value: { error: { code: already_consumed, message: "Magic link has already been used" } } }
+
+  /auth/keys:
+    get:
+      operationId: listPlayerApiKeys
+      tags: [Player auth]
+      summary: List the current player's ApiKeys
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: List of keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiKeyEntry" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: revokePlayerApiKey
+      tags: [Player auth]
+      summary: Revoke an ApiKey
+      description: |
+        Sets `revoked_at` on the named key. Revoking the current key is
+        allowed; subsequent requests with it 401.
+      security: [{ playerBearer: [] }]
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Player servers ─────────────────────────────────────────────────────────
+
+  /servers:
+    get:
+      operationId: listPlayerServers
+      tags: [Player servers]
+      summary: List servers the player is a member of OR eligible to join
+      description: |
+        Returns the union of:
+        1. Servers the current player already has a `ServerMembership` on
+           (`member: true`).
+        2. Servers whose `ServerAccess` admits the player's email
+           (`member: false`).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: List of servers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servers]
+                properties:
+                  servers:
+                    type: array
+                    items: { $ref: "#/components/schemas/ServerSummary" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /servers/{id}/join:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: joinServer
+      tags: [Player servers]
+      summary: Join a server the player is admitted to
+      description: |
+        Creates a `ServerMembership` if any of the server's
+        `ServerAccess` rules admits the player's email. Idempotent — a
+        re-join returns the same `201` with the existing membership.
+      security: [{ playerBearer: [] }]
+      responses:
+        "201":
+          description: Membership created (or already present).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [membership_id, server]
+                properties:
+                  membership_id: { type: string }
+                  server: { $ref: "#/components/schemas/ServerSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Player is not admitted to this server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              examples:
+                forbidden: { value: { error: { code: forbidden, message: "You are not admitted to this server" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /servers/{id}/me:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    patch:
+      operationId: updateOwnProfile
+      tags: [Player profile]
+      summary: Update handle and/or real name for this server
+      description: |
+        Updates the current player's per-server profile.
+
+        `handle` rules (§17.1):
+        - Length 3–20.
+        - Must start with a letter.
+        - Allowed characters: `a-zA-Z0-9_` plus single internal spaces.
+        - No leading, trailing, or consecutive spaces.
+        - Reserved (case-insensitive): `admin`, `system`, `dun`, `world`,
+          `neutral`, `wilderness`, `server`, `anonymous`, `none`, `null`.
+        - Case-preserved on display, case-insensitive for uniqueness
+          within a server.
+
+        `real_name` is 1–60 characters, unicode permitted.
+
+        Either field may be omitted (no-op for the missing field). Phase
+        2 will activate the `handle_locked` guard during active rounds.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle:    { type: string, minLength: 3, maxLength: 20, example: IronFist }
+                real_name: { type: string, minLength: 1, maxLength: 60, example: "Alice Example" }
+      responses:
+        "200":
+          description: Profile updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerProfileWrite" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Validation or lock failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              examples:
+                invalid:        { value: { error: { code: invalid,        message: "Handle is reserved" } } }
+                handle_locked:  { value: { error: { code: handle_locked,  message: "Handle is locked during an active round" } } }
+
+  /servers/{serverId}/players/{handle}:
+    parameters:
+      - in: path
+        name: serverId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: handle
+        required: true
+        schema: { type: string }
+    get:
+      operationId: showPlayerProfile
+      tags: [Player profile]
+      summary: Show a player profile by handle
+      description: |
+        Returns the per-server profile including the real name. Caller
+        must be a member of the server (§17.1: real name visible only to
+        server members).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerProfileRead" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Caller is not a member of this server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin auth ─────────────────────────────────────────────────────────────
+
+  /admin/auth/magic_link:
+    post:
+      operationId: requestAdminMagicLink
+      tags: [Admin auth]
+      summary: Request an admin magic-link email
+      description: 'Enqueues `MagicLinkMailer#send_link` with `scope: "admin"`.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, example: boss@example.com }
+      responses:
+        "202": { description: Mailer enqueued. }
+        "422": { $ref: "#/components/responses/ParamMissing" }
+
+  /admin/auth/exchange:
+    post:
+      operationId: exchangeAdminMagicLink
+      tags: [Admin auth]
+      summary: Exchange an admin magic-link token for an admin ApiKey
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "201":
+          description: Admin ApiKey issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeResponse" }
+        "401":
+          description: Token invalid, expired, already consumed, or wrong scope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /admin/auth/keys:
+    get:
+      operationId: listAdminApiKeys
+      tags: [Admin auth]
+      summary: List the current admin's ApiKeys
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: List of admin keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiKeyEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /admin/auth/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: revokeAdminApiKey
+      tags: [Admin auth]
+      summary: Revoke an admin ApiKey
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin servers ──────────────────────────────────────────────────────────
+
+  /admin/servers:
+    get:
+      operationId: listAdminServers
+      tags: [Admin servers]
+      summary: List servers this admin administers
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Servers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servers]
+                properties:
+                  servers:
+                    type: array
+                    items: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createServer
+      tags: [Admin servers]
+      summary: Create a server with the caller as owner
+      description: |
+        Creates a new server and a `ServerAdminship(role: "owner")` for
+        the calling admin in one transaction. Slug is auto-derived from
+        the name when not provided.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: "Acme Co" }
+                slug:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"
+                  description: 3-40 chars, lowercase alnum + hyphens; auto-derived from name when omitted.
+                  example: acme
+      responses:
+        "201":
+          description: Server created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          description: Slug taken or invalid; name blank.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /admin/servers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    patch:
+      operationId: updateServer
+      tags: [Admin servers]
+      summary: Update world limits / display name
+      description: |
+        Whitelisted fields: `name`, `max_concurrent_worlds`,
+        `max_worlds_per_account`. Anything else (slug, owner) is
+        silently ignored.
+
+        Per §16.7, limit changes apply at join time only — existing
+        memberships are never retroactively pruned.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                max_concurrent_worlds:  { type: integer, minimum: 0, example: 4 }
+                max_worlds_per_account: { type: integer, minimum: 0, example: 2 }
+      responses:
+        "200":
+          description: Updated server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    delete:
+      operationId: deleteServer
+      tags: [Admin servers]
+      summary: Delete a server
+      description: |
+        Hard-deletes the server. Cascades through all dependent rows:
+        adminships, memberships, accesses, and player profiles.
+        Any admin who administers the server may delete it.
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Server deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin co-admins ────────────────────────────────────────────────────────
+
+  /admin/servers/{serverId}/admins:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+    get:
+      operationId: listServerAdmins
+      tags: [Admin co-admins]
+      summary: List adminships on a server
+      description: Returns rows ordered by `joined_at`. Includes the owner.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Adminships.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admins]
+                properties:
+                  admins:
+                    type: array
+                    items: { $ref: "#/components/schemas/Adminship" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: inviteServerAdmin
+      tags: [Admin co-admins]
+      summary: Invite a co-admin by email
+      description: |
+        Find-or-creates the `Admin` (no password needed — they sign in
+        via `/admin/auth/magic_link`). Idempotent on the
+        (server, admin) pair.
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, example: coadmin@example.com }
+      responses:
+        "201":
+          description: Adminship created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Adminship" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/servers/{serverId}/admins/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+        description: Target **Admin id** (not adminship id).
+    delete:
+      operationId: revokeServerAdmin
+      tags: [Admin co-admins]
+      summary: Revoke a co-admin's adminship
+      description: |
+        §17.1 invariant: **a server always has at least one admin**.
+        Removing the last admin returns `422 last_admin`.
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Adminship removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: Target has no adminship on this server, or caller doesn't administer it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          description: Would leave server with zero admins.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              examples:
+                last_admin: { value: { error: { code: last_admin, message: "Cannot remove the only remaining admin" } } }
+
+  # ─── Admin invitations ──────────────────────────────────────────────────────
+
+  /admin/servers/{serverId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+    get:
+      operationId: listServerInvitations
+      tags: [Admin invitations]
+      summary: List invite-kind ServerAccess rows
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitations]
+                properties:
+                  invitations:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invitation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createServerInvitation
+      tags: [Admin invitations]
+      summary: Add an invite-kind ServerAccess row
+      description: Idempotent on (server, email).
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, example: guest@personal.com }
+      responses:
+        "201":
+          description: Invitation created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/servers/{serverId}/invitations/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: deleteServerInvitation
+      tags: [Admin invitations]
+      summary: Remove an invitation
+      description: |
+        Does NOT remove any `ServerMembership` rows the invite
+        previously granted — admission is not retroactive per §16.7.
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Invitation removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin members ──────────────────────────────────────────────────────────
+
+  /admin/servers/{serverId}/members:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+    get:
+      operationId: listServerMembers
+      tags: [Admin members]
+      summary: List server memberships
+      description: Real names are visible to admins (§17.1).
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Memberships.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Player worlds ──────────────────────────────────────────────────────────
+
+  /worlds/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showWorld
+      tags: [Player worlds]
+      summary: Show a world
+      description: |
+        Returns world status, T0/grace timestamps, region/kingdom counts, and the
+        caller's kingdom summary when present. Non-members of the server receive
+        `404` (existence is not disclosed across server boundaries).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: World detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/World" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{id}/join:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: joinWorld
+      tags: [Player worlds]
+      summary: Join a world
+      description: |
+        Permitted while `status` is `proposed` or `grace`. During `proposed` a
+        stub kingdom is created (no home region); home regions are assigned at
+        `Worlds::Start`. During `grace` the join immediately assigns a spawn
+        region and applies the §16.8 stockpile bonus.
+
+        Admission is gated by `ServerAccess` (domain whitelist or invite list).
+        `WorldInvitation` records do NOT gate admission.
+      security: [{ playerBearer: [] }]
+      responses:
+        "201":
+          description: Kingdom created or returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Kingdom" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: World not joinable, or `max_worlds_per_account` reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /worlds/{id}/map:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showWorldMap
+      tags: [Player worlds]
+      summary: List every region with terrain, nodes, and adjacency
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Region list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [regions]
+                properties:
+                  regions:
+                    type: array
+                    items: { $ref: "#/components/schemas/RegionSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/regions/{id}:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showRegion
+      tags: [Player worlds]
+      summary: Region detail (`map <region>`)
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Region detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Region" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/regions/{id}/adjacent:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showRegionAdjacent
+      tags: [Player worlds]
+      summary: Adjacency list for a region
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Adjacent regions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [regions]
+                properties:
+                  regions:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, terrain]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        terrain: { type: string, enum: [plains, forest, hills, mountain, marsh] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/ruins:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listRuins
+      tags: [Player worlds]
+      summary: List ruins on a world
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Ruin list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ruins]
+                properties:
+                  ruins:
+                    type: array
+                    items: { $ref: "#/components/schemas/Ruin" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/nodes:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listNodes
+      tags: [Player worlds]
+      summary: List nodes on a world
+      description: |
+        Lists every Node on the world, including wilderness nodes (with their
+        static NPC garrison composition), captured nodes (with `owner_kingdom_id`
+        set and an empty `garrison`), and home-hoard nodes (`is_home_hoard: true`).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Node list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes]
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Node" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/nodes/{id}:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showNode
+      tags: [Player worlds]
+      summary: Show a single node
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Node detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node]
+                properties:
+                  node: { $ref: "#/components/schemas/Node" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Phase 3: player kingdoms (buildings + stockpile) ──────────────────────
+
+  /kingdoms/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showKingdom
+      tags: [Player kingdoms]
+      summary: Show the caller's kingdom dashboard
+      description: |
+        Returns materialized stockpiles (lazily accrued from the last checkpoint
+        against current production rates and Warehouse cap), production rates,
+        buildings, and any in-progress build orders. Ripe build orders are
+        resolved before serializing.
+
+        Non-owners receive `404` (existence is not disclosed).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Kingdom detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KingdomDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kingdoms/{id}/build:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: queueBuildOrder
+      tags: [Player kingdoms]
+      summary: Queue a building upgrade
+      description: |
+        `target_level` must equal the building's current level + 1 (defensive
+        concurrency check). Resource cost is deducted via `Stockpile::Apply`
+        immediately. Time = `min(base × 1.55^(L-1), 24h)` × Stone Mason discount.
+
+        Idempotent retry: if an identical in-progress order already exists for
+        the same `building` + `target_level`, returns it without re-deducting.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [building, target_level]
+              properties:
+                building:
+                  type: string
+                  enum:
+                    [ town_hall, gold_mint, lumber_camp, quarry, iron_mine,
+                      warehouse, barracks, stable, siege_workshop, walls,
+                      watchtower, stone_mason ]
+                target_level: { type: integer, minimum: 1, maximum: 20 }
+      responses:
+        "201":
+          description: Build order created (or returned, if idempotent).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuildOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            `unknown_building`, `world_not_buildable`, `kingdom_eliminated`,
+            `invalid_target_level`, `tier_gate_unmet`, `queue_full`, or
+            `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{kingdom_id}/build/{id}:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: cancelBuildOrder
+      tags: [Player kingdoms]
+      summary: Cancel an in-progress build order
+      description: |
+        Refunds 75% of resources (floored, applied via `Stockpile::Apply`).
+        Elapsed time is lost. The build slot is freed immediately.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Build order cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuildOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`build_order_already_resolved`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{id}/train:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: queueTrainingOrder
+      tags: [Player kingdoms]
+      summary: Queue a unit training order
+      description: |
+        Each military building (Barracks, Stable, Siege Workshop) has its own
+        independent FIFO training queue (§11). Cost is per-unit × count and
+        deducted via `Stockpile::Apply` immediately. Time per unit follows
+        `base × 0.95^(building_level - 1)`; total time = per-unit × count.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [building, unit, count]
+              properties:
+                building:
+                  type: string
+                  enum: [barracks, stable, siege_workshop]
+                unit: { $ref: "#/components/schemas/Unit" }
+                count: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Training order created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrainingOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            `unknown_unit`, `building_missing`, `unit_not_trainable_here`,
+            `world_not_buildable`, `kingdom_eliminated`, or
+            `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{id}/armies:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: listKingdomArmies
+      tags: [Player kingdoms]
+      summary: List the player's armies in this kingdom
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Armies list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [armies]
+                properties:
+                  armies:
+                    type: array
+                    items: { $ref: "#/components/schemas/Army" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /armies/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showArmy
+      tags: [Player armies]
+      summary: Show an army owned by the requesting player
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Army detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Army" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /armies/{id}/march:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: dispatchMarch
+      tags: [Player armies]
+      summary: Dispatch the army on a march
+      description: |
+        Plans the shortest path on the region adjacency graph and computes
+        per-leg time using the slowest unit's speed and the average terrain
+        modifier of each leg's two endpoints (§16.10). Knight/Scout-only
+        armies ignore terrain. Schedules a `march_arrival` ScheduledEvent at
+        `arrives_at`. Phase 6 will plug combat into the arrival handler.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_region_id, intent]
+              properties:
+                target_region_id: { type: string }
+                intent:
+                  type: string
+                  enum: [attack, reinforce, scout, capture, claim_ruin, caravan]
+      responses:
+        "201":
+          description: March dispatched.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarchOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            `army_not_home`, `world_not_active`, `invalid_intent`,
+            `army_empty`, `cross_world`, `unreachable`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /armies/{id}/recall:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: recallMarch
+      tags: [Player armies]
+      summary: Recall the army's active march
+      description: |
+        Cancels the pending `march_arrival` event and creates a new return
+        MarchOrder (intent `reinforce`) with the path reversed and an
+        elapsed-time return (v1 simplification — no per-leg position
+        tracking). v1 charges no unit losses on recall.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Return march scheduled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarchOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No active march for this army.
+        "422":
+          description: "`march_already_resolved`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /armies/{id}/split:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: splitArmy
+      tags: [Player armies]
+      summary: Carve a new army out of an existing home army
+      description: |
+        Source must be `status: home`. Returns the (now-shrunk) source and the
+        newly-created army. If the source is empty after the split it is
+        destroyed (unless it is the kingdom's auto-managed Garrison).
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units, name]
+              properties:
+                units:
+                  type: object
+                  description: Map of unit kind to count to peel off the source army.
+                  additionalProperties: { type: integer, minimum: 0 }
+                name: { type: string, maxLength: 60 }
+      responses:
+        "201":
+          description: Split complete.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [new]
+                properties:
+                  source:
+                    oneOf:
+                      - { $ref: "#/components/schemas/Army" }
+                      - { type: "null" }
+                  new: { $ref: "#/components/schemas/Army" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`army_not_home`, `insufficient_units`, `empty_split`, `invalid_army`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /armies/{id}/rename:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: renameArmy
+      tags: [Player armies]
+      summary: Rename an army
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 60 }
+      responses:
+        "200":
+          description: Army renamed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Army" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`name_taken`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /armies/{id}/merge:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: mergeArmy
+      tags: [Player armies]
+      summary: Merge another home army into this one
+      description: "Both armies must belong to the same kingdom, share a region, and be `status: home`."
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_id]
+              properties:
+                from_id: { type: string }
+      responses:
+        "200":
+          description: Merge complete.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Army" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`incompatible_armies`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{kingdom_id}/train/{id}:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: cancelTrainingOrder
+      tags: [Player kingdoms]
+      summary: Cancel an in-progress training order
+      description: |
+        Refunds 75% of total cost (per-unit × count, floored). Time elapsed is
+        lost. The matching `training_completion` ScheduledEvent is marked
+        processed.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Training order cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrainingOrder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`training_order_already_resolved`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  # ─── Phase 6: battles ───────────────────────────────────────────────────────
+
+  /kingdoms/{kingdom_id}/battles:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listKingdomBattles
+      tags: [Player battles]
+      summary: List battles involving this kingdom (attacker or defender)
+      description: |
+        Battles are ordered by `ended_at` desc, then by `id` desc for a stable
+        tie-break. Default limit is 25; max 100.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Battle list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [battles, total_count]
+                properties:
+                  battles:
+                    type: array
+                    items: { $ref: "#/components/schemas/Battle" }
+                  total_count: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /battles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showBattle
+      tags: [Player battles]
+      summary: Show a single battle, with full round-by-round log + participants
+      description: |
+        Visible to players who own either the attacker or the defender kingdom.
+        Other players receive 404.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Battle detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [battle, participants]
+                properties:
+                  battle: { $ref: "#/components/schemas/Battle" }
+                  participants:
+                    type: array
+                    items: { $ref: "#/components/schemas/BattleParticipant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin worlds ───────────────────────────────────────────────────────────
+
+  /admin/servers/{server_id}/worlds:
+    parameters:
+      - $ref: "#/components/parameters/PathServerId"
+    get:
+      operationId: listAdminWorlds
+      tags: [Admin worlds]
+      summary: List worlds on an administered server
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: World list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [worlds]
+                properties:
+                  worlds:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: proposeWorld
+      tags: [Admin worlds]
+      summary: Propose a new world on this server
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, min_players, t0_at]
+              properties:
+                name: { type: string, example: "Spring 2026" }
+                slug:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"
+                  example: "spring-2026"
+                min_players: { type: integer, example: 4 }
+                t0_at:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 UTC timestamp for round start (T0).
+                auto_cancel_after_hours:
+                  type: integer
+                  description: Hours after creation before an empty proposed world auto-cancels.
+      responses:
+        "201":
+          description: World created in `proposed` state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`concurrent_world_limit_reached` or `param_missing`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /admin/worlds/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showAdminWorld
+      tags: [Admin worlds]
+      summary: Show a world the caller administers
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: World detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: configureWorld
+      tags: [Admin worlds]
+      summary: Reconfigure a proposed world (name, t0_at, min_players, auto_cancel)
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                min_players: { type: integer }
+                t0_at: { type: string, format: date-time }
+                auto_cancel_after_hours: { type: integer }
+      responses:
+        "200":
+          description: World updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`world_not_configurable` when the world is past `proposed`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /admin/worlds/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: cancelWorld
+      tags: [Admin worlds]
+      summary: Cancel a proposed world
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: World cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`world_not_cancellable` when the world has started."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  # ─── Admin world invitations (informational) ────────────────────────────────
+
+  /admin/worlds/{world_id}/invitations:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listWorldInvitations
+      tags: [Admin world invitations]
+      summary: List informational invitations on a world
+      description: These records are notification metadata only — they do NOT gate join. `ServerAccess` controls admission.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitations]
+                properties:
+                  invitations:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorldInvitation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createWorldInvitation
+      tags: [Admin world invitations]
+      summary: Record an informational world invitation
+      security: [{ adminBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "201":
+          description: Invitation recorded (idempotent on duplicates).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorldInvitation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/worlds/{world_id}/invitations/{id}:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      operationId: deleteWorldInvitation
+      tags: [Admin world invitations]
+      summary: Remove an informational invitation
+      security: [{ adminBearer: [] }]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Admin world battles ────────────────────────────────────────────────────
+
+  /admin/worlds/{world_id}/battles:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listWorldBattles
+      tags: [Admin worlds]
+      summary: List all battles in an administered world
+      description: |
+        Visible to admins of the world's server. Battles are ordered by
+        `ended_at` desc, then `id` desc. Default limit is 25; max 100.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Battle list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [battles, total_count]
+                properties:
+                  battles:
+                    type: array
+                    items: { $ref: "#/components/schemas/Battle" }
+                  total_count: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── Phase 8: trade caravans + public ledger ───────────────────────────────
+
+  /kingdoms/{kingdom_id}/caravans:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: dispatchCaravan
+      tags: [Player trade]
+      summary: Dispatch a caravan from this kingdom to another in the same world
+      description: |
+        Splits `escort_units` off the caller-specified `source_army_id` (must be
+        home at the sender's home region), deducts `payload` from the sender
+        stockpile, and dispatches the escort as a march with intent `caravan`.
+        On arrival, the caravan either delivers to the receiver or — if a
+        third-party kingdom has an army camped at the destination region — is
+        intercepted (the strongest hostile fights the escort).
+
+        Constraints:
+        - `escort_units` total carrying capacity must be ≥ sum of `payload`.
+        - Sender and receiver must be in the same world; self-trade rejected.
+        - Receiver kingdom must not be eliminated.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiver_handle, source_army_id, payload, escort_units]
+              properties:
+                receiver_handle: { type: string, description: "Receiver player's handle on this server." }
+                source_army_id:  { type: string, description: "Army the escort is split off of." }
+                payload:
+                  type: object
+                  description: Resources to send. Keys are `gold|wood|stone|iron`; values are positive integers.
+                  additionalProperties: { type: integer, minimum: 1 }
+                escort_units:
+                  type: object
+                  description: Units forming the escort. Keys are unit kinds (`levy`, `archer`, ...); values are positive integers.
+                  additionalProperties: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Caravan dispatched.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Caravan" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: Kingdom or source army not visible to caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          description: |
+            Validation rejected. Possible `error.code`: `receiver_not_found`,
+            `cross_world`, `self_trade`, `receiver_eliminated`,
+            `insufficient_capacity`, `invalid_payload`, `insufficient_resources`,
+            `army_not_home`, `insufficient_units`, `empty_escort`, `unreachable`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /worlds/{world_id}/trade-ledger:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listTradeLedger
+      tags: [Player trade]
+      summary: Public per-world trade ledger (caravan dispatches, deliveries, interceptions)
+      description: |
+        World-scoped, newest first. Status mutates in place as caravans
+        progress (`in_transit` → `delivered` or `intercepted`). Handles are
+        snapshotted at dispatch time and remain stable even if a player later
+        changes their handle. Visible to any member of the world's server.
+
+        Filters:
+        - `?player=<handle>` — matches sender, receiver, OR attacker handle.
+        - `?since=<duration>` — `Nh`, `Nd`, `Nw`, etc. Defaults to no lower bound.
+        - `?limit=<n>` — page size (max 100; default 25).
+        - `?page=<n>` — 1-based page number.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: player
+          required: false
+          schema: { type: string }
+        - in: query
+          name: since
+          required: false
+          schema: { type: string, example: "24h" }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: page
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        "200":
+          description: Ledger page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, pagy]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/TradeLedgerEntry" }
+                  pagy:
+                    type: object
+                    required: [count, page, limit, pages]
+                    properties:
+                      count: { type: integer, minimum: 0 }
+                      page:  { type: integer, minimum: 1 }
+                      limit: { type: integer, minimum: 1 }
+                      pages: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kingdoms/{kingdom_id}/wonder:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getWonder
+      tags: [Player wonders]
+      summary: Get this kingdom's Wonder (lazily-applied current HP)
+      description: |
+        Returns the kingdom's Wonder if any. The server calls
+        `Wonders::ApplyConstruction` before serializing so the response
+        reflects current HP, including any milestone auto-pause.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: "Wonder (or `{wonder: null}` if none exists)."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Wonder"
+                  - type: object
+                    properties:
+                      wonder: { nullable: true, example: null }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: startWonder
+      tags: [Player wonders]
+      summary: Begin construction of a Wonder
+      description: |
+        Validates prerequisites (§14 + §16.2 building gates, ≥3 owned nodes,
+        no live Wonder, stockpile ≥ foundation cost), deducts the 25%
+        foundation payment, locks the build queue, and schedules the
+        +90h consecration transition.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WonderStartRequest" }
+      responses:
+        "201":
+          description: Wonder created in `construction` status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wonder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            Validation rejected. Possible `error.code`: `unknown_wonder_name`,
+            `wonder_prereq_unmet`, `wonder_already_active`,
+            `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    delete:
+      operationId: cancelWonder
+      tags: [Player wonders]
+      summary: Abandon a live Wonder (paid resources lost)
+      description: |
+        Marks the Wonder `destroyed` (full loss). Unlocks the build queue.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Wonder is now destroyed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wonder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kingdoms/{kingdom_id}/wonder/repair:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: repairWonder
+      tags: [Player wonders]
+      summary: Repair the Wonder (1 HP per 8 Stone)
+      description: |
+        Phase cap: 2000 HP per phase (foundation/construction/consecration
+        independent). Pauses construction 30 min per 500 HP repaired
+        (stacks if already paused).
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WonderRepairRequest" }
+      responses:
+        "200":
+          description: Updated Wonder.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wonder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            Validation rejected. Possible `error.code`: `wonder_not_repairable`,
+            `invalid_amount`, `repair_cap_reached`, `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{kingdom_id}/wonder/milestone:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: payWonderMilestone
+      tags: [Player wonders]
+      summary: Pay a milestone (25/50/75%) to resume construction
+      description: |
+        Construction auto-pauses when HP crosses a milestone threshold
+        (2500/5000/7500). The player must call this to deduct the 10%
+        milestone payment and resume accrual.
+      security: [{ playerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WonderMilestoneRequest" }
+      responses:
+        "200":
+          description: Updated Wonder.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wonder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: |
+            Validation rejected. Possible `error.code`: `no_milestone_pending`,
+            `wrong_milestone_percent`, `milestone_already_paid`,
+            `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /auth/account:
+    delete:
+      operationId: deleteAccount
+      tags: [Account]
+      summary: Irreversibly delete the caller's account
+      description: |
+        §17.4 account deletion. Effects:
+        - Real name purged immediately.
+        - Per-server handle anonymized to `[deleted player #<id>]`; original
+          handle is reserved for 30 days before becoming available again.
+        - Stats counters zeroed across all servers.
+        - Champion titles removed from leaderboard snapshots.
+        - All player ApiKeys revoked (the calling key returns 401 on next use).
+        - Player row tombstoned (email replaced, name `[deleted]`); the row
+          stays so archive references remain intact.
+        Irreversible. Battle reports and trade ledger keep their
+        handle-at-time-of-event snapshots.
+      security: [{ playerBearer: [] }]
+      responses:
+        "204": { description: Account deleted. The calling key is now invalid. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /servers/{id}/hall-of-fame:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: getHallOfFame
+      tags: [Hall of Fame]
+      summary: Per-server leaderboard snapshots
+      description: |
+        Returns the four leaderboard snapshots (Champions, Wreckers, Warlords,
+        Veterans), recomputed only at round end (§17.4). Caller must be a
+        member of the server.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: kind
+          required: false
+          schema: { type: string, enum: [champions, wreckers, warlords, veterans] }
+          description: Restrict the response to a single leaderboard kind.
+      responses:
+        "200":
+          description: Hall of fame snapshots.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HallOfFame" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Invalid `kind` value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /worlds/{world_id}/archive:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getWorldArchive
+      tags: [World archive]
+      summary: Frozen end-of-round state for an archived world
+      description: |
+        Returns the immutable per-world archive snapshot built at round end
+        (§16.6): final regions, kingdoms, Wonder state, and aggregate counts.
+        404 while the world is still live or has no archive row. Caller must
+        be a member of the world's hosting server.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Archive snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoundArchive" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /worlds/{world_id}/wonders:
+    parameters:
+      - in: path
+        name: world_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listWorldWonders
+      tags: [Player wonders]
+      summary: Public list of Wonders in the world
+      description: |
+        World-scoped, ordered by creation time. Visible to any member of
+        the world's server.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Wonder list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [wonders]
+                properties:
+                  wonders:
+                    type: array
+                    items: { $ref: "#/components/schemas/WonderListItem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+
+components:
+
+  securitySchemes:
+    playerBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Player-scope ApiKey from `POST /auth/exchange`.
+    adminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Admin-scope ApiKey from `POST /admin/auth/exchange`.
+
+  parameters:
+    PathId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, description: "ULID (26 chars, Crockford base-32)." }
+    PathServerId:
+      in: path
+      name: serverId
+      required: true
+      schema: { type: string, description: "ULID (26 chars, Crockford base-32)." }
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or wrong-scope ApiKey.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          examples:
+            unauthorized: { value: { error: { code: unauthorized, message: "Invalid or missing API key" } } }
+    NotFound:
+      description: Resource does not exist or is not visible to the caller.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    ParamMissing:
+      description: Required parameter absent.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          examples:
+            param_missing: { value: { error: { code: param_missing, message: "param is missing or the value is empty: email" } } }
+    Forbidden:
+      description: Caller is authenticated but not authorized for this resource.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable code. Known values:
+                `unauthorized`, `invalid_token`, `expired`,
+                `already_consumed`, `forbidden`, `not_found`,
+                `last_admin`, `handle_locked`, `invalid`,
+                `param_missing`.
+              enum:
+                - unauthorized
+                - invalid_token
+                - expired
+                - already_consumed
+                - forbidden
+                - not_found
+                - last_admin
+                - handle_locked
+                - invalid
+                - param_missing
+            message: { type: string }
+            retry_after:
+              type: integer
+              description: Seconds until the caller may retry (rate-limit responses only).
+
+    ExchangeResponse:
+      type: object
+      required: [api_key, expires_at, owner]
+      properties:
+        api_key:
+          type: string
+          description: Raw ApiKey shown ONCE. Persisted only as SHA-256 digest.
+          example: "abc123..."
+        expires_at:
+          type: string
+          format: date-time
+          description: Initial 90-day expiry. Slides forward on each authenticated request.
+        owner:
+          type: object
+          required: [id, email, name, type]
+          properties:
+            id:    { type: string }
+            email: { type: string, format: email }
+            name:  { type: string }
+            type:
+              type: string
+              enum: [player, admin]
+
+    ApiKeyEntry:
+      type: object
+      required: [id, name, last_used_at, expires_at, revoked_at, current]
+      properties:
+        id:           { type: string }
+        name:         { type: [string, "null"], description: "Caller-set label e.g. \"laptop\"." }
+        last_used_at: { type: [string, "null"], format: date-time }
+        expires_at:   { type: string, format: date-time }
+        revoked_at:   { type: [string, "null"], format: date-time }
+        current:      { type: boolean, description: "True iff this is the key used to authenticate the current request." }
+
+    ServerSummary:
+      type: object
+      description: Reduced shape returned to players.
+      required: [id, slug, name, member]
+      properties:
+        id:     { type: string }
+        slug:   { type: string }
+        name:   { type: string }
+        member: { type: boolean }
+
+    Server:
+      type: object
+      description: Full shape returned to admins.
+      required: [id, slug, name, max_concurrent_worlds, max_worlds_per_account, owner_admin_id]
+      properties:
+        id:                     { type: string }
+        slug:                   { type: string }
+        name:                   { type: string }
+        max_concurrent_worlds:  { type: integer }
+        max_worlds_per_account: { type: integer }
+        owner_admin_id:         { type: string }
+
+    Adminship:
+      type: object
+      required: [adminship_id, admin, role, granted_by_admin_id, joined_at]
+      properties:
+        adminship_id: { type: string }
+        admin:
+          type: object
+          required: [id, email, name]
+          properties:
+            id:    { type: string }
+            email: { type: string, format: email }
+            name:  { type: string }
+        role:
+          type: string
+          enum: [owner, admin]
+        granted_by_admin_id: { type: [string, "null"] }
+        joined_at:           { type: string, format: date-time }
+
+    Invitation:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id:         { type: string }
+        email:      { type: string, format: email }
+        created_at: { type: string, format: date-time }
+
+    Member:
+      type: object
+      required: [membership_id, player, joined_at]
+      properties:
+        membership_id: { type: string }
+        player:
+          type: object
+          required: [id, email, name]
+          properties:
+            id:    { type: string }
+            email: { type: string, format: email }
+            name:  { type: string }
+        joined_at: { type: string, format: date-time }
+
+    PlayerProfileWrite:
+      type: object
+      description: Returned by `PATCH /servers/{id}/me`.
+      required: [handle, real_name, stats, title]
+      properties:
+        handle:    { type: [string, "null"] }
+        real_name: { type: [string, "null"] }
+        stats:     { $ref: "#/components/schemas/PlayerStats" }
+        title:     { type: [string, "null"], description: "Rendered inline title per §17.4, e.g. `[Champion of Aldermarch ×2]`." }
+
+    PlayerProfileRead:
+      type: object
+      description: Returned by `GET /servers/{serverId}/players/{handle}`.
+      required: [handle, real_name, stats, title, joined_at]
+      properties:
+        handle:    { type: string }
+        real_name: { type: [string, "null"] }
+        stats:     { $ref: "#/components/schemas/PlayerStats" }
+        title:     { type: [string, "null"] }
+        joined_at: { type: string, format: date-time }
+
+    PlayerStats:
+      type: object
+      description: Persistent per-player counters (§17.4).
+      required:
+        - rounds_played
+        - rounds_won
+        - wonders_completed
+        - wonders_destroyed
+        - peak_nodes
+        - raids_launched
+        - raids_defended
+        - raids_won_offense
+        - raids_won_defense
+        - resources_looted
+      properties:
+        rounds_played:     { type: integer, minimum: 0 }
+        rounds_won:        { type: integer, minimum: 0 }
+        wonders_completed: { type: integer, minimum: 0 }
+        wonders_destroyed: { type: integer, minimum: 0 }
+        peak_nodes:        { type: integer, minimum: 0 }
+        raids_launched:    { type: integer, minimum: 0 }
+        raids_defended:    { type: integer, minimum: 0 }
+        raids_won_offense: { type: integer, minimum: 0 }
+        raids_won_defense: { type: integer, minimum: 0 }
+        resources_looted:  { type: integer, minimum: 0 }
+
+    # ─── Phase 2: worlds, regions, nodes, ruins, kingdoms ─────────────────────
+
+    World:
+      type: object
+      description: Player-side world summary; `my_kingdom` is present iff the caller has joined.
+      required: [id, server_id, name, slug, status, min_players, t0_at, region_count, kingdom_count]
+      properties:
+        id: { type: string }
+        server_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [proposed, grace, active, archived, cancelled] }
+        min_players: { type: integer }
+        t0_at: { type: string, format: date-time }
+        grace_closes_at: { type: [string, "null"], format: date-time }
+        region_count: { type: integer }
+        kingdom_count: { type: integer }
+        my_kingdom: { $ref: "#/components/schemas/Kingdom" }
+
+    AdminWorld:
+      type: object
+      description: Admin-side world detail (includes seed, lifecycle timestamps, wonder metadata).
+      required: [id, server_id, name, slug, status, seed, min_players, auto_cancel_after_hours, t0_at]
+      properties:
+        id: { type: string }
+        server_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        seed: { type: string }
+        status: { type: string, enum: [proposed, grace, active, archived, cancelled] }
+        min_players: { type: integer }
+        auto_cancel_after_hours: { type: integer }
+        t0_at: { type: string, format: date-time }
+        grace_closes_at: { type: [string, "null"], format: date-time }
+        archived_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+        wonder_name: { type: [string, "null"] }
+
+    Kingdom:
+      type: object
+      required: [id, world_id, stockpiles, joined_at]
+      properties:
+        id: { type: string }
+        world_id: { type: string }
+        home_region_id:
+          type: [string, "null"]
+          description: Nil while the world is `proposed`; assigned at `Worlds::Start` or at join during `grace`.
+        stockpiles:
+          type: object
+          additionalProperties: true
+          description: Per-resource integer stockpiles plus `checkpoint_at`.
+        joined_at: { type: string, format: date-time }
+
+    Position:
+      type: object
+      description: Normalized [0, 1] coordinates from blue-noise sampling at map generation.
+      required: [x, y]
+      properties:
+        x: { type: number, format: float }
+        y: { type: number, format: float }
+
+    NodeSummary:
+      type: object
+      required: [id, resource, tier, is_home_hoard]
+      properties:
+        id: { type: string }
+        resource: { type: string, enum: [gold, wood, stone, iron] }
+        tier: { type: string, enum: [poor, standard, rich] }
+        is_home_hoard: { type: boolean }
+
+    Node:
+      allOf:
+        - $ref: "#/components/schemas/NodeSummary"
+        - type: object
+          properties:
+            base_rate: { type: integer }
+            owner_kingdom_id: { type: [string, "null"] }
+            region_id: { type: string }
+            region_name: { type: string }
+            garrison:
+              type: object
+              description: Wilderness garrison composition. Empty hash after capture (one-time per §16.5).
+              additionalProperties: { type: integer }
+
+    RuinSummary:
+      type: object
+      required: [id, tier, claimed]
+      properties:
+        id: { type: string }
+        tier: { type: string, enum: [minor, standard, major] }
+        claimed: { type: boolean }
+
+    Ruin:
+      type: object
+      required: [id, region_id, region_name, tier, garrison, cache, claimed]
+      properties:
+        id: { type: string }
+        region_id: { type: string }
+        region_name: { type: string }
+        tier: { type: string, enum: [minor, standard, major] }
+        garrison:
+          type: object
+          additionalProperties: { type: integer }
+        cache:
+          type: object
+          additionalProperties: { type: integer }
+        claimed: { type: boolean }
+        claimed_by_kingdom_id: { type: [string, "null"] }
+        claimed_at: { type: [string, "null"], format: date-time }
+
+    RegionSummary:
+      type: object
+      required: [id, name, terrain, position, adjacency, nodes]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        terrain: { type: string, enum: [plains, forest, hills, mountain, marsh] }
+        position: { $ref: "#/components/schemas/Position" }
+        is_hub: { type: boolean }
+        spawn_eligible: { type: boolean }
+        your_spawn: { type: boolean }
+        adjacency:
+          type: array
+          items: { type: string }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/NodeSummary" }
+        ruin:
+          oneOf:
+            - { $ref: "#/components/schemas/RuinSummary" }
+            - { type: "null" }
+
+    Region:
+      type: object
+      required: [id, name, terrain, position, adjacency, nodes]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        terrain: { type: string, enum: [plains, forest, hills, mountain, marsh] }
+        position: { $ref: "#/components/schemas/Position" }
+        is_hub: { type: boolean }
+        spawn_eligible: { type: boolean }
+        adjacency:
+          type: array
+          items: { type: string }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/Node" }
+        ruin:
+          oneOf:
+            - { $ref: "#/components/schemas/Ruin" }
+            - { type: "null" }
+        owner_kingdom_id: { type: [string, "null"] }
+
+    WorldInvitation:
+      type: object
+      description: Informational record only — does NOT gate world admission.
+      required: [id, email, invited_by_admin_id, created_at]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        invited_by_admin_id: { type: string }
+        created_at: { type: string, format: date-time }
+
+    # ─── Phase 3: buildings + build orders ───────────────────────────────────
+
+    Building:
+      type: object
+      required: [id, kind, level]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum:
+            [ town_hall, gold_mint, lumber_camp, quarry, iron_mine, warehouse,
+              barracks, stable, siege_workshop, walls, watchtower, stone_mason ]
+        level: { type: integer, minimum: 0, maximum: 20 }
+
+    BuildOrder:
+      type: object
+      required: [id, building_id, kind, target_level, started_at, completes_at]
+      properties:
+        id: { type: string }
+        building_id: { type: string }
+        kind:
+          type: string
+          enum:
+            [ town_hall, gold_mint, lumber_camp, quarry, iron_mine, warehouse,
+              barracks, stable, siege_workshop, walls, watchtower, stone_mason ]
+        target_level: { type: integer, minimum: 1, maximum: 20 }
+        started_at: { type: string, format: date-time }
+        completes_at: { type: string, format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+
+    StockpileMap:
+      type: object
+      description: Per-resource integer amounts after lazy accrual against current rates and Warehouse cap.
+      required: [gold, wood, stone, iron]
+      properties:
+        gold: { type: integer }
+        wood: { type: integer }
+        stone: { type: integer }
+        iron: { type: integer }
+
+    ProductionRates:
+      type: object
+      description: Per-resource units/hour from buildings + owned nodes.
+      required: [gold, wood, stone, iron]
+      properties:
+        gold: { type: integer }
+        wood: { type: integer }
+        stone: { type: integer }
+        iron: { type: integer }
+
+    KingdomDetail:
+      type: object
+      required:
+        [ id, world_id, stockpiles, warehouse_cap, production_rates,
+          joined_at, buildings, in_progress_builds, in_progress_training ]
+      properties:
+        id: { type: string }
+        world_id: { type: string }
+        home_region_id: { type: [string, "null"] }
+        stockpiles: { $ref: "#/components/schemas/StockpileMap" }
+        warehouse_cap: { type: integer }
+        production_rates: { $ref: "#/components/schemas/ProductionRates" }
+        joined_at: { type: string, format: date-time }
+        eliminated_at: { type: [string, "null"], format: date-time }
+        buildings:
+          type: array
+          items: { $ref: "#/components/schemas/Building" }
+        in_progress_builds:
+          type: array
+          items: { $ref: "#/components/schemas/BuildOrder" }
+        in_progress_training:
+          type: array
+          items: { $ref: "#/components/schemas/TrainingOrder" }
+
+    # ─── Phase 5: units, training, armies, marches ───────────────────────────
+
+    Unit:
+      type: string
+      description: The 8 unit kinds from §16.3.
+      enum: [levy, archer, pikeman, knight, catapult, royal_guard, scout, trebuchet]
+
+    TrainingOrder:
+      type: object
+      required:
+        [ id, kingdom_id, building_id, building_kind, unit, count,
+          started_at, completes_at ]
+      properties:
+        id: { type: string }
+        kingdom_id: { type: string }
+        building_id: { type: string }
+        building_kind:
+          type: string
+          enum: [barracks, stable, siege_workshop]
+        unit: { $ref: "#/components/schemas/Unit" }
+        count: { type: integer, minimum: 1 }
+        started_at: { type: string, format: date-time }
+        completes_at: { type: string, format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+
+    Composition:
+      type: object
+      description: Map of unit kind to non-negative integer count.
+      additionalProperties: { type: integer, minimum: 0 }
+
+    Army:
+      type: object
+      required: [id, kingdom_id, name, status, location_region_id, composition, total_capacity]
+      properties:
+        id: { type: string }
+        kingdom_id: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [home, marching, engaged, returning]
+        location_region_id: { type: string }
+        composition: { $ref: "#/components/schemas/Composition" }
+        total_capacity: { type: integer }
+
+    MarchOrder:
+      type: object
+      required:
+        [ id, army_id, intent, origin_region_id, target_region_id, path,
+          dispatched_at, arrives_at ]
+      properties:
+        id: { type: string }
+        army_id: { type: string }
+        intent:
+          type: string
+          enum: [attack, reinforce, scout, capture, claim_ruin, caravan]
+        origin_region_id: { type: string }
+        target_region_id: { type: string }
+        path:
+          type: array
+          description: Region IDs from origin (first) to target (last), inclusive.
+          items: { type: string }
+        dispatched_at: { type: string, format: date-time }
+        arrives_at: { type: string, format: date-time }
+        arrived_at: { type: [string, "null"], format: date-time }
+        recalled_at: { type: [string, "null"], format: date-time }
+
+    # ─── Phase 6: battles ──────────────────────────────────────────────────────
+
+    BattleRoundLogEntry:
+      type: object
+      description: One round of the 6-round simulator (§16.3).
+      required: [round, attacker_damage_dealt, defender_damage_dealt, attacker_casualties, defender_casualties]
+      properties:
+        round: { type: integer, minimum: 1, maximum: 6 }
+        attacker_atk: { type: number }
+        attacker_def: { type: number }
+        defender_atk: { type: number }
+        defender_def: { type: number }
+        attacker_damage_dealt: { type: number }
+        defender_damage_dealt: { type: number }
+        attacker_casualties: { $ref: "#/components/schemas/Composition" }
+        defender_casualties: { $ref: "#/components/schemas/Composition" }
+        walls_damage: { type: integer, minimum: 0 }
+        walls_level_after: { type: integer, minimum: 0 }
+
+    Battle:
+      type: object
+      required:
+        [ id, world_id, region_id, attacker_kingdom_id, defender_kingdom_id,
+          outcome, loot, log, started_at, ended_at ]
+      properties:
+        id: { type: string }
+        world_id: { type: string }
+        region_id: { type: string }
+        attacker_kingdom_id: { type: string }
+        defender_kingdom_id: { type: string }
+        attacker_title: { type: [string, "null"], description: "Rendered title for the attacker (§17.4)." }
+        defender_title: { type: [string, "null"], description: "Rendered title for the defender (§17.4)." }
+        march_order_id: { type: [string, "null"] }
+        outcome:
+          type: string
+          enum: [attacker_victory, defender_victory, attacker_rout, defender_rout]
+          description: Final battle outcome per §16.3.
+        loot:
+          type: object
+          description: Resources transferred from defender to attacker (after caps).
+          additionalProperties: { type: integer, minimum: 0 }
+        log:
+          type: array
+          description: Round-by-round summary; 1 to 6 entries.
+          items: { $ref: "#/components/schemas/BattleRoundLogEntry" }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+
+    BattleParticipant:
+      type: object
+      required: [id, battle_id, kingdom_id, side, starting_composition, ending_composition, casualties]
+      properties:
+        id: { type: string }
+        battle_id: { type: string }
+        kingdom_id: { type: string }
+        army_id: { type: [string, "null"] }
+        side: { type: string, enum: [attacker, defender] }
+        starting_composition: { $ref: "#/components/schemas/Composition" }
+        ending_composition: { $ref: "#/components/schemas/Composition" }
+        casualties: { $ref: "#/components/schemas/Composition" }
+
+    # ─── Phase 8: trade caravans + public ledger ─────────────────────────────
+
+    Caravan:
+      type: object
+      required:
+        [ id, world_id, sender_kingdom_id, receiver_kingdom_id,
+          origin_region_id, destination_region_id, payload, escort_units,
+          status, dispatched_at, arrives_at ]
+      properties:
+        id: { type: string }
+        world_id: { type: string }
+        sender_kingdom_id: { type: string }
+        receiver_kingdom_id: { type: string }
+        origin_region_id: { type: string }
+        destination_region_id: { type: string }
+        payload:
+          type: object
+          description: Resources carried. Keys are `gold|wood|stone|iron`.
+          additionalProperties: { type: integer, minimum: 0 }
+        escort_units:
+          type: object
+          description: Escort army composition at dispatch (snapshot).
+          additionalProperties: { type: integer, minimum: 0 }
+        status:
+          type: string
+          enum: [in_transit, delivered, intercepted]
+          description: |
+            `in_transit` after dispatch; transitions to `delivered` if the
+            escort reaches the destination unopposed (or wins the
+            interception combat), or `intercepted` if a third-party hostile
+            wins.
+        dispatched_at: { type: string, format: date-time }
+        arrives_at:    { type: string, format: date-time }
+        delivered_at:   { type: [string, "null"], format: date-time }
+        intercepted_at: { type: [string, "null"], format: date-time }
+        outbound_march_order_id: { type: [string, "null"] }
+        return_march_order_id:   { type: [string, "null"] }
+
+    TradeLedgerEntry:
+      type: object
+      required: [id, caravan_id, sender_handle, receiver_handle, resource, amount, status, recorded_at]
+      description: |
+        One row per non-zero resource per caravan. Handles are snapshotted at
+        dispatch and remain stable even if a player later changes their handle.
+        `attacker_handle` is set only when `status` is `intercepted`.
+      properties:
+        id: { type: string }
+        caravan_id: { type: string }
+        sender_handle:   { type: string, description: "Sender handle snapshotted at dispatch." }
+        receiver_handle: { type: string, description: "Receiver handle snapshotted at dispatch." }
+        attacker_handle: { type: [string, "null"], description: "Interceptor handle (intercepted entries only)." }
+        resource:
+          type: string
+          enum: [gold, wood, stone, iron]
+        amount: { type: integer, minimum: 0 }
+        status:
+          type: string
+          enum: [in_transit, delivered, intercepted]
+        recorded_at: { type: string, format: date-time }
+
+    # ─── Phase 9: Wonders ────────────────────────────────────────────────────
+
+    Wonder:
+      type: object
+      required: [id, kingdom_id, world_id, name, status, hp, target_hp, milestones_paid, repaired_hp_by_phase]
+      properties:
+        id: { type: string }
+        kingdom_id: { type: string }
+        world_id:   { type: string }
+        name:
+          type: string
+          enum: [sky_tower, eternal_citadel, cathedral_of_ages, library_of_worlds, crown_of_kings, black_spire]
+          description: Wonder name from the §14 fixed menu.
+        status:
+          type: string
+          enum: [foundation, construction, consecration, completed, destroyed]
+        hp:        { type: integer, minimum: 0, description: "Current HP." }
+        target_hp: { type: integer, minimum: 1, description: "Max HP for the current phase (10,000 once construction begins)." }
+        milestones_paid:
+          type: object
+          description: Tracks whether each milestone (25/50/75%) has been paid.
+          properties:
+            "25": { type: boolean }
+            "50": { type: boolean }
+            "75": { type: boolean }
+        pending_milestone_percent:
+          type: [integer, "null"]
+          enum: [25, 50, 75, null]
+          description: |
+            Non-null when construction is paused at a milestone threshold awaiting
+            payment. Player must POST /wonder/milestone {percent} to resume.
+        pending_milestone_cost:
+          type: [object, "null"]
+          description: Per-resource cost of the pending milestone payment (null if none pending).
+          additionalProperties: { type: integer, minimum: 0 }
+        repaired_hp_by_phase:
+          type: object
+          description: HP already repaired in each phase (cap is 2000 HP per phase, independent).
+          properties:
+            foundation:   { type: integer, minimum: 0 }
+            construction: { type: integer, minimum: 0 }
+            consecration: { type: integer, minimum: 0 }
+        paused_until:           { type: [string, "null"], format: date-time, description: "Set by repairs — construction resumes after this timestamp." }
+        started_at:             { type: string, format: date-time }
+        construction_started_at: { type: [string, "null"], format: date-time }
+        consecration_at:        { type: [string, "null"], format: date-time }
+        completed_at:           { type: [string, "null"], format: date-time }
+        destroyed_at:           { type: [string, "null"], format: date-time }
+
+    WonderListItem:
+      type: object
+      required: [id, kingdom_id, builder_handle, name, status, hp, target_hp, hp_pct, started_at]
+      description: Compact public view of a Wonder for the world-list endpoint.
+      properties:
+        id: { type: string }
+        kingdom_id: { type: string }
+        builder_handle: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [foundation, construction, consecration, completed, destroyed]
+        hp:     { type: integer, minimum: 0 }
+        target_hp: { type: integer, minimum: 1 }
+        hp_pct: { type: integer, minimum: 0, maximum: 100 }
+        started_at:      { type: string, format: date-time }
+        consecration_at: { type: [string, "null"], format: date-time }
+        completed_at:    { type: [string, "null"], format: date-time }
+        destroyed_at:    { type: [string, "null"], format: date-time }
+
+    WonderStartRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          enum: [sky_tower, eternal_citadel, cathedral_of_ages, library_of_worlds, crown_of_kings, black_spire]
+
+    WonderRepairRequest:
+      type: object
+      required: [hp]
+      properties:
+        hp:
+          type: integer
+          minimum: 1
+          description: HP to repair. Effective amount may be clamped by the 2000 HP/phase cap or remaining HP-to-target.
+
+    WonderMilestoneRequest:
+      type: object
+      required: [percent]
+      properties:
+        percent:
+          type: integer
+          enum: [25, 50, 75]
+
+    # ─── Phase 10: round end, archive, leaderboards ─────────────────────────
+
+    RoundArchive:
+      type: object
+      description: |
+        Frozen end-of-round snapshot of an archived world (§16.6). Read-only;
+        served by `GET /worlds/{world_id}/archive`. `frozen_state` is opaque
+        from the API's perspective; the schema below documents the keys the
+        backend currently writes.
+      required: [world_id, ended_at, frozen_state]
+      properties:
+        world_id:          { type: string }
+        winner_kingdom_id: { type: [string, "null"] }
+        wonder_name:       { type: [string, "null"] }
+        ended_at:          { type: string, format: date-time }
+        frozen_state:      { $ref: "#/components/schemas/FrozenState" }
+
+    FrozenState:
+      type: object
+      description: Per-world end-of-round snapshot payload.
+      required: [ended_at, regions, kingdoms, battles_count, caravans_count, nodes_count]
+      properties:
+        ended_at: { type: string, format: date-time }
+        regions:
+          type: array
+          items:
+            type: object
+            required: [id, name, terrain, position, is_hub, node_ids]
+            properties:
+              id:       { type: string }
+              name:     { type: string }
+              terrain:  { type: string }
+              position: { $ref: "#/components/schemas/Position" }
+              is_hub:   { type: boolean }
+              node_ids: { type: array, items: { type: string } }
+        kingdoms:
+          type: array
+          items:
+            type: object
+            required: [id, handle, home_region_id, final_stockpiles, building_levels, peak_nodes, final_node_count, joined_at]
+            properties:
+              id:               { type: string }
+              handle:           { type: [string, "null"] }
+              real_name:        { type: [string, "null"] }
+              home_region_id:   { type: [string, "null"] }
+              final_stockpiles: { $ref: "#/components/schemas/StockpileMap" }
+              building_levels:
+                type: object
+                additionalProperties: { type: integer, minimum: 0 }
+              peak_nodes:       { type: integer, minimum: 0 }
+              final_node_count: { type: integer, minimum: 0 }
+              joined_at:        { type: [string, "null"], format: date-time }
+              eliminated_at:    { type: [string, "null"], format: date-time }
+        wonder:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [kingdom_id, name, status, hp, target_hp]
+              properties:
+                kingdom_id:           { type: string }
+                name:                 { type: string }
+                status:               { type: string, enum: [foundation, construction, consecration, completed, destroyed] }
+                hp:                   { type: integer, minimum: 0 }
+                target_hp:            { type: integer, minimum: 1 }
+                damage_events_count:  { type: integer, minimum: 0 }
+                started_at:           { type: [string, "null"], format: date-time }
+                completed_at:         { type: [string, "null"], format: date-time }
+                destroyed_at:         { type: [string, "null"], format: date-time }
+        battles_count:  { type: integer, minimum: 0 }
+        caravans_count: { type: integer, minimum: 0 }
+        nodes_count:    { type: integer, minimum: 0 }
+
+    HallOfFame:
+      type: object
+      description: Per-server leaderboard envelope returned by `GET /servers/{id}/hall-of-fame`.
+      required: [server_id, leaderboards]
+      properties:
+        server_id: { type: string }
+        leaderboards:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Leaderboard" }
+          description: Keyed by leaderboard kind (`champions`, `wreckers`, `warlords`, `veterans`).
+
+    Leaderboard:
+      type: object
+      required: [snapshot_at, entries]
+      properties:
+        snapshot_at: { type: [string, "null"], format: date-time }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/LeaderboardEntry" }
+
+    LeaderboardEntry:
+      type: object
+      required: [player_profile_id, handle, score, secondary]
+      properties:
+        player_profile_id: { type: [string, "null"] }
+        handle:            { type: [string, "null"] }
+        score:             { type: integer, minimum: 0 }
+        secondary:         { type: integer, minimum: 0 }
+        title:             { type: [string, "null"] }
+
