@@ -1,7 +1,7 @@
 # Build artifacts
 /bin/
 /dist/
-dun
+/dun
 *.exe
 *.test
 coverage.*
