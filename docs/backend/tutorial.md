@@ -190,6 +190,25 @@ curl http://localhost:3000/v1/admin/servers \
   -H 'Authorization: Bearer k_live_abc123...'
 ```
 
+`200 OK`:
+
+```json
+{
+  "servers": [
+    {
+      "id": "01HX...",
+      "slug": "acme",
+      "name": "Acme Co",
+      "max_concurrent_worlds": 2,
+      "max_worlds_per_account": 2,
+      "owner_admin_id": "01HA..."
+    }
+  ]
+}
+```
+
+Returns every server where you hold an adminship (owner or co-admin); servers you don't administer are not disclosed.
+
 See [openapi.yaml](openapi.yaml) — `createServer`, `updateServer`, `listAdminServers`.
 
 ### 2.4 Configure access to the server
@@ -366,7 +385,7 @@ Returns past and present worlds (any status).
 
 See [openapi.yaml](openapi.yaml) — `proposeWorld`, `listAdminWorlds`.
 
-### 2.8 Edit or cancel a proposed world
+### 2.8 Edit, cancel, or force-start a proposed world
 
 While the world is still `proposed` you can adjust `name`, `t0_at`, `min_players`, and `auto_cancel_after_hours`. Once it transitions past `proposed`, the configuration is frozen.
 
@@ -390,7 +409,18 @@ curl -X POST http://localhost:3000/v1/admin/worlds/01HW.../cancel \
 
 `200 OK` — world transitions to `cancelled` (terminal). Cancelling anything past `proposed` returns `422 world_not_cancellable`. An idle `proposed` world also self-cancels automatically `auto_cancel_after_hours` after creation.
 
-See [openapi.yaml](openapi.yaml) — `configureWorld`, `cancelWorld`.
+**Force-start a world without waiting.** If you don't want a world to sit in `proposed` until `t0_at` and `min_players` are both met — useful for demos, dev/test, or recovery — admins can transition it straight to `grace`:
+
+```bash
+curl -X POST http://localhost:3000/v1/admin/worlds/01HW.../start \
+  -H 'Authorization: Bearer k_live_abc123...'
+```
+
+`200 OK` — world transitions to `grace`. The call bypasses both gates: `t0_at` doesn't have to have arrived, and the join count doesn't have to reach `min_players` (an empty world with zero kingdoms is allowed). The backend anchors `t0_at` and `grace_closes_at` to the moment of the call, so the 72h late-join window opens immediately and players can still join during it ([§3.5](#35-join-a-world)).
+
+Starting a world that isn't `proposed` returns `422 world_not_startable`.
+
+See [openapi.yaml](openapi.yaml) — `configureWorld`, `cancelWorld`, `startWorld`.
 
 ### 2.9 World-level invitations (optional)
 
@@ -428,13 +458,13 @@ See [openapi.yaml](openapi.yaml) — `createWorldInvitation`, `listWorldInvitati
 
 ### 2.10 Watch a world go live
 
-There's no `start` endpoint — worlds transition autonomously based on time and player count. The lifecycle:
+Worlds transition autonomously based on time and player count; an admin can also force the transition out of `proposed` via [§2.8](#28-edit-cancel-or-force-start-a-proposed-world). The lifecycle:
 
 1. **`proposed`** — created via [§2.7](#27-propose-a-new-world). Joinable.
 2. **`grace`** — when `t0_at` is reached *and* `joined_count >= min_players`, the world auto-starts: map is generated from `seed`, spawn regions are assigned to anyone who joined during `proposed`, the 72-hour late-join window opens. `grace_closes_at` is now set.
 3. **`active`** — when `grace_closes_at` passes. Late-join is closed; full game mechanics (combat, raids, Wonders) are live.
 4. **`archived`** — terminal. Triggered when a Wonder survives Consecration. World is read-only; `archived_at` is set.
-5. **`cancelled`** — terminal. Triggered by [§2.8](#28-edit-or-cancel-a-proposed-world) or by `auto_cancel_after_hours` elapsing while still empty.
+5. **`cancelled`** — terminal. Triggered by [§2.8](#28-edit-cancel-or-force-start-a-proposed-world) or by `auto_cancel_after_hours` elapsing while still empty.
 
 If T0 fires but `joined_count < min_players`, the world stays `proposed` and re-checks each tick.
 
@@ -488,7 +518,7 @@ curl -X DELETE http://localhost:3000/v1/admin/servers/01HX... \
 
 **When not to do this.**
 
-- **A round is active.** Players will lose in-progress kingdoms with no archive. Wait for round end, or cancel the world first ([§2.8](#28-edit-or-cancel-a-proposed-world)).
+- **A round is active.** Players will lose in-progress kingdoms with no archive. Wait for round end, or cancel the world first ([§2.8](#28-edit-cancel-or-force-start-a-proposed-world)).
 - **You only want to slow new joins.** Reduce `max_concurrent_worlds` or stop creating worlds — deletion is a sledgehammer.
 - **You only want to remove yourself.** Revoke your own adminship ([§2.5](#25-invite-co-admins)) instead, after adding a co-admin so the last-admin guard doesn't block you.
 
@@ -635,16 +665,45 @@ See [openapi.yaml](openapi.yaml) — `listPlayerServers`, `joinServer`.
 
 ### 3.4 Browse available worlds
 
-The player API today has **no "list worlds on this server" endpoint** — you look up worlds by ID. You'll get those IDs out-of-band: an admin shares them, a CLI client surfaces them, or you're notified via a `WorldInvitation` (informational only — see [§2.9](#29-world-level-invitations-optional)).
+Once you're a member of a server, list every world hosted on it — past and present, every status:
 
-Once you have a world ID:
+```bash
+curl http://localhost:3000/v1/servers/01HX.../worlds \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK`:
+
+```json
+{
+  "worlds": [
+    {
+      "id": "01HW...",
+      "server_id": "01HX...",
+      "name": "Spring 2026",
+      "slug": "spring-2026",
+      "status": "proposed",
+      "min_players": 4,
+      "t0_at": "2026-05-24T18:00:00Z",
+      "grace_closes_at": null,
+      "archived_at": null,
+      "cancelled_at": null,
+      "wonder_name": null
+    }
+  ]
+}
+```
+
+Ordered by `t0_at` descending — upcoming rounds come first, archived/cancelled history follows. Non-members of the server get `404`, not `403` (existence isn't disclosed across server boundaries).
+
+The list shape is intentionally lean — no `my_kingdom`, no `region_count`/`kingdom_count`. To fetch the full detail for a single world (including your kingdom summary if you've joined), call:
 
 ```bash
 curl http://localhost:3000/v1/worlds/01HW... \
   -H 'Authorization: Bearer k_live_player_xyz...'
 ```
 
-`200 OK` — the world detail. Key fields to read before deciding to join:
+`200 OK` — the full world detail. Key fields to read before deciding to join:
 
 - `status` — `proposed` (joinable, T0 not yet reached), `grace` (joinable, late-join window), `active` (closed), `archived` / `cancelled` (terminal).
 - `t0_at` — when the round will start (if `proposed`).
@@ -652,9 +711,9 @@ curl http://localhost:3000/v1/worlds/01HW... \
 - `min_players` and current join count.
 - Region count and any caller-side kingdom summary if you've already joined.
 
-Non-members of the server get `404`, not `403` — world existence isn't disclosed across server boundaries.
+You may also learn about specific worlds out-of-band: an admin shares an ID, a CLI client surfaces it, or you're notified via a `WorldInvitation` (informational only — see [§2.9](#29-world-level-invitations-optional)).
 
-See [openapi.yaml](openapi.yaml) — `showWorld`.
+See [openapi.yaml](openapi.yaml) — `listServerWorlds`, `showWorld`.
 
 ### 3.5 Join a world
 
@@ -699,6 +758,75 @@ curl http://localhost:3000/v1/kingdoms/01HK... \
 
 `200 OK` — materialized stockpiles, production rates, all buildings with their current level, and any in-progress build orders. The server lazily accrues stockpiles from the last checkpoint against current production and the Warehouse cap *before* serializing, so the numbers are current. Ripe build orders are resolved on the same call.
 
+**List all buildings with upgrade detail.**
+
+The dashboard tells you what you have. To find out what you can upgrade *right now* without making twelve preview calls, hit:
+
+```bash
+curl http://localhost:3000/v1/kingdoms/01HK.../buildings \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK` — one entry per building kind (12 entries, sorted alphabetically), each carrying the full upgrade-preview payload plus an `id`, an `upgrade_possible` flag, and the in-progress `build_order` for that building (or `null`):
+
+```json
+{
+  "kingdom_id": "01HK...",
+  "buildings": [
+    {
+      "id": "01HB...",
+      "kind": "barracks",
+      "current_level": 1,
+      "target_level": 2,
+      "at_max_level": false,
+      "cost": { "gold": 263, "wood": 350, "stone": 175, "iron": 88 },
+      "duration_seconds": 300,
+      "tier_gates_met": true,
+      "tier_gates_unmet": [],
+      "affordable": true,
+      "missing": { "gold": 0, "wood": 0, "stone": 0, "iron": 0 },
+      "upgrade_possible": true,
+      "build_order": null
+    }
+  ]
+}
+```
+
+`upgrade_possible` is `true` iff the building is below `MAX_LEVEL`, every tier gate is satisfied, the kingdom can pay the cost, **and** there's no in-progress upgrade on that building. An active `build_order` forces it to `false` because the build queue rejects a second order against the same building (you'd get `422 queue_full`).
+
+Pass `?upgrade_possible=true` to narrow the response to the actionable subset — handy for rendering a "Build" tab that only shows what the player can queue this instant:
+
+```bash
+curl "http://localhost:3000/v1/kingdoms/01HK.../buildings?upgrade_possible=true" \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+**Preview the cost before queuing.**
+
+```bash
+curl "http://localhost:3000/v1/kingdoms/01HK.../build/preview?building=warehouse" \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK`:
+
+```json
+{
+  "kind": "warehouse",
+  "current_level": 1,
+  "target_level": 2,
+  "at_max_level": false,
+  "cost": { "gold": 88, "wood": 350, "stone": 175, "iron": 35 },
+  "duration_seconds": 279,
+  "tier_gates_met": true,
+  "tier_gates_unmet": [],
+  "affordable": true,
+  "missing": { "gold": 0, "wood": 0, "stone": 0, "iron": 0 }
+}
+```
+
+The preview is informational only — it returns the cost even when the world is not in a buildable state or a tier gate is unmet (`tier_gates_unmet` lists the prerequisites you still need). The `POST .../build` call is what enforces those at commit time. If the building is already at `MAX_LEVEL`, `target_level`, `cost`, and `duration_seconds` come back as `null` with `at_max_level: true`.
+
 **Queue a building upgrade.**
 
 ```bash
@@ -710,8 +838,29 @@ curl -X POST http://localhost:3000/v1/kingdoms/01HK.../build \
 
 `201 Created` — returns the `BuildOrder` with `completes_at`. Cost is deducted immediately. Time is `min(base × 1.55^(L-1), 24h) × stone_mason_discount`. `target_level` must equal *current level + 1* — a defensive concurrency check.
 
-**Building catalog:**
-`town_hall`, `gold_mint`, `lumber_camp`, `quarry`, `iron_mine`, `warehouse`, `barracks`, `stable`, `siege_workshop`, `walls`, `watchtower`, `stone_mason`.
+**Building catalog.** Twelve kinds, grouped by role:
+
+*Economy — produce resources at `base_rate × level` per hour.*
+- `gold_mint` — produces **gold** (30/hr at L1, 600/hr at L20).
+- `lumber_camp` — produces **wood** (40/hr at L1, 800/hr at L20).
+- `quarry` — produces **stone** (25/hr at L1, 500/hr at L20). Stone is the late-game bottleneck for Wonders and Walls — bank early.
+- `iron_mine` — produces **iron** (30/hr at L1, 600/hr at L20). Iron gates elite units (Knights, Royal Guard, Trebuchets) and is required at L5 to build a Siege Workshop.
+
+*Storage — raise the ceiling.*
+- `warehouse` — sets the per-resource stockpile cap to `5000 + 2500 × level²` (≈7.5k at L1, ≈255k at L10, ≈1.0M at L20). Resources stop accruing at the cap, so upgrading is what unlocks larger raids and Wonder savings.
+
+*Support — meta-buildings.*
+- `town_hall` — base build queue is one slot; reaching `town_hall` L10 adds a second slot, L20 adds a third. Lets you build two or three things in parallel.
+- `stone_mason` — applies a global discount of `2% per level` to every building's build time, capped at `-30%` (reached at L15). The discount applies retroactively to in-progress and queued orders when an upgrade completes.
+
+*Military — each trains a different unit class and runs its own independent FIFO training queue (see [§3.7](#37-your-first-steps--military)). Upgrading reduces per-unit train time by 5% compounding per level (`base × 0.95^(L-1)`).*
+- `barracks` — trains `levy`, `archer`, `pikeman`. Gates Stable (needs L3) and Siege Workshop (needs L5).
+- `stable` — trains `knight`, `scout`, `royal_guard`. Requires Barracks L3 before you can build it.
+- `siege_workshop` — trains `catapult`, `trebuchet`. Requires Barracks L5 **and** Iron Mine L5.
+
+*Defense — passive, no queue.*
+- `walls` — adds `+1%` per level to your home-region defender bonus on top of the base `+20%`, with a hard cap at `+40%` total (reached at walls L20). Walls also have `1000 HP per level`, which Catapults must chew through before damaging your garrison.
+- `watchtower` — placeholder building; reserved for future early-warning / scouting mechanics. Has no mechanical effect on the current phase but is included so existing kingdoms don't need migration when it lights up.
 
 **Single build slot.** Each kingdom has one active build order at a time. Queueing a second returns `422 queue_full`. Repeated identical orders are idempotent — same `building` + `target_level` returns the existing order without re-deducting.
 
@@ -724,13 +873,42 @@ curl -X DELETE http://localhost:3000/v1/kingdoms/01HK.../build/01HB... \
 
 `200 OK`. Refunds 75% of resources (floored). Elapsed time is lost; the build slot frees immediately.
 
-**Why upgrade the Warehouse early.** Stockpile cap scales quadratically with Warehouse level (roughly 1M per resource at L20). Hitting the cap means production silently caps out — visible by comparing `production_rate` to actual stockpile growth in successive dashboard reads.
+**Why upgrade the Warehouse early.** Stockpile cap scales quadratically with Warehouse level (roughly 1M per resource at L20). Hitting the cap means production silently caps out — visible by comparing `production_rates` (units per hour, per resource) to actual stockpile growth in successive dashboard reads.
 
-See [openapi.yaml](openapi.yaml) — `showKingdom`, `queueBuildOrder`, `cancelBuildOrder`.
+See [openapi.yaml](openapi.yaml) — `showKingdom`, `previewBuildUpgrade`, `queueBuildOrder`, `cancelBuildOrder`.
 
 ### 3.7 Your first steps — Military
 
 Each military building has its own independent FIFO training queue (§11): Barracks, Stable, Siege Workshop. They run in parallel — three orders, one per building, all training at once.
+
+**Preview the cost before queuing.**
+
+```bash
+curl "http://localhost:3000/v1/kingdoms/01HK.../train/preview?building=barracks&unit=pikeman&count=10" \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK`:
+
+```json
+{
+  "building_kind": "barracks",
+  "unit": "pikeman",
+  "count": 10,
+  "building_level": 3,
+  "building_built": true,
+  "unit_trainable_here": true,
+  "per_unit_cost": { "gold": 40, "wood": 50, "stone": 10, "iron": 40 },
+  "total_cost":    { "gold": 400, "wood": 500, "stone": 100, "iron": 400 },
+  "per_unit_seconds": 162,
+  "total_seconds": 1620,
+  "affordable": true,
+  "missing": { "gold": 0, "wood": 0, "stone": 0, "iron": 0 },
+  "max_affordable_count": 125
+}
+```
+
+`max_affordable_count` is the largest count your current stockpile can fully fund — useful when you want to "train as many as I can afford" without trial-and-error. `unit_trainable_here` and `building_built` are advisory flags: the preview still reports cost even when they're false, but the actual `POST .../train` will reject the combo.
 
 **Queue a training order.**
 
@@ -773,7 +951,7 @@ curl http://localhost:3000/v1/kingdoms/01HK.../armies \
 
 Newly-trained units land in your home Garrison automatically. Split them out into named armies in [§3.9](#39-march-scout-reinforce).
 
-See [openapi.yaml](openapi.yaml) — `queueTrainingOrder`, `cancelTrainingOrder`, `listKingdomArmies`.
+See [openapi.yaml](openapi.yaml) — `previewTrainingOrder`, `queueTrainingOrder`, `cancelTrainingOrder`, `listKingdomArmies`.
 
 ### 3.8 Read the map
 

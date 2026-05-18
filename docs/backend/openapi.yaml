@@ -1,4 +1,4 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: dun HTTP API
   version: "1.0.0-phase9"
@@ -71,7 +71,7 @@ tags:
   - name: Player worlds
     description: Player-facing world listing, join, and map/region/ruin reads.
   - name: Admin worlds
-    description: Admin propose/configure/cancel for worlds on administered servers.
+    description: Admin propose/configure/cancel/force-start for worlds on administered servers.
   - name: Admin world invitations
     description: Informational invitations attached to a world; do NOT gate admission (server access still rules).
   - name: Player kingdoms
@@ -281,6 +281,37 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
               examples:
                 forbidden: { value: { error: { code: forbidden, message: "You are not admitted to this server" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /servers/{id}/worlds:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: listServerWorlds
+      tags: [Player worlds]
+      summary: List worlds on a server the caller is a member of
+      description: |
+        Returns every `World` on the server, of any status, ordered by `t0_at`
+        descending. Caller must be a member of the server (non-members get
+        `404` — existence is not disclosed across server boundaries).
+
+        Lean shape: omits `region_count`, `kingdom_count`, and `my_kingdom`.
+        Use `GET /worlds/{id}` to fetch full per-world detail including the
+        caller's kingdom.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: List of worlds on the server.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [worlds]
+                properties:
+                  worlds:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorldSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /servers/{id}/me:
@@ -1016,6 +1047,90 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
+  /kingdoms/{kingdom_id}/buildings:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listKingdomBuildings
+      tags: [Player kingdoms]
+      summary: List a kingdom's buildings with upgrade detail
+      description: |
+        Returns one entry per building kind in the catalog (12 entries, sorted by
+        `kind`). Each entry includes the same upgrade-preview detail as
+        `GET /kingdoms/{id}/build/preview` (cost, duration, tier gates,
+        affordability) plus the in-progress `build_order` for that building (if
+        any) and a derived `upgrade_possible` flag.
+
+        `upgrade_possible` is `true` iff the building is not at max level, all
+        tier gates are met, the kingdom can afford the cost, **and** the building
+        does not already have an in-progress upgrade. An active `build_order`
+        forces the flag to `false` because the build queue rejects a second
+        order against the same building.
+
+        `Buildings::ResolveCompletions` runs first so ripe builds are reflected
+        before the snapshot is computed.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: upgrade_possible
+          required: false
+          schema: { type: string, enum: ["true", "false", "1", "0"] }
+          description: |
+            When `true` (or `1`), restrict the response to rows where
+            `upgrade_possible == true`. Any other value (including absent)
+            returns the full list.
+      responses:
+        "200":
+          description: List of buildings with upgrade detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KingdomBuildingsList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kingdoms/{id}/build/preview:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: previewBuildUpgrade
+      tags: [Player kingdoms]
+      summary: Preview the cost of the next building upgrade
+      description: |
+        Returns the resource cost, duration, tier-gate status, and affordability
+        for the next level of a building. Informational only — it reports cost
+        regardless of world status, kingdom-eliminated, wonder-in-progress, or
+        build-queue slot availability. The actual `POST /kingdoms/{id}/build`
+        still enforces those at commit time.
+
+        `Buildings::ResolveCompletions` runs first so `current_level` reflects
+        any builds that have ripened since the last request.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: building
+          required: true
+          schema:
+            type: string
+            enum:
+              [ town_hall, gold_mint, lumber_camp, quarry, iron_mine, warehouse,
+                barracks, stable, siege_workshop, walls, watchtower, stone_mason ]
+      responses:
+        "200":
+          description: Upgrade preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuildingUpgradePreview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`unknown_building`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /kingdoms/{kingdom_id}/build/{id}:
     parameters:
       - in: path
@@ -1084,6 +1199,52 @@ paths:
             `unknown_unit`, `building_missing`, `unit_not_trainable_here`,
             `world_not_buildable`, `kingdom_eliminated`, or
             `insufficient_resources`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{id}/train/preview:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: previewTrainingOrder
+      tags: [Player kingdoms]
+      summary: Preview the cost of a training order
+      description: |
+        Returns per-unit and total cost, per-unit and total time, affordability,
+        and `max_affordable_count` (the largest count the current stockpile
+        would support). Informational only — `unit_trainable_here: false` and
+        `building_built: false` are advisory flags; the actual
+        `POST /kingdoms/{id}/train` still rejects mismatched combinations.
+
+        `Training::ResolveCompletions` runs first so `building_level` reflects
+        any training that has ripened since the last request.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: building
+          required: true
+          schema:
+            type: string
+            enum: [barracks, stable, siege_workshop]
+        - in: query
+          name: unit
+          required: true
+          schema: { $ref: "#/components/schemas/Unit" }
+        - in: query
+          name: count
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Training preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrainingPreview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`unknown_unit`, `invalid_building_kind`, or `invalid_count`."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -1233,9 +1394,10 @@ paths:
                 required: [new]
                 properties:
                   source:
-                    oneOf:
+                    type: object
+                    nullable: true
+                    allOf:
                       - { $ref: "#/components/schemas/Army" }
-                      - { type: "null" }
                   new: { $ref: "#/components/schemas/Army" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1406,7 +1568,7 @@ paths:
 
   # ─── Admin worlds ───────────────────────────────────────────────────────────
 
-  /admin/servers/{server_id}/worlds:
+  /admin/servers/{serverId}/worlds:
     parameters:
       - $ref: "#/components/parameters/PathServerId"
     get:
@@ -1532,6 +1694,32 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
           description: "`world_not_cancellable` when the world has started."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /admin/worlds/{id}/start:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      operationId: startWorld
+      tags: [Admin worlds]
+      summary: Force-start a proposed world
+      description: >
+        Transitions a proposed world directly to `grace`, bypassing both the `t0_at`
+        wait and the `min_players` threshold. Anchors `t0_at` and `grace_closes_at`
+        to the moment of the call. Players can still join during the 72h grace window.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: World force-started; now in `grace`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminWorld" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`world_not_startable` when the world is not in `proposed` status."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -1795,7 +1983,7 @@ paths:
                   - $ref: "#/components/schemas/Wonder"
                   - type: object
                     properties:
-                      wonder: { nullable: true, example: null }
+                      wonder: { type: object, nullable: true, example: null }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     post:
@@ -2142,10 +2330,10 @@ components:
       required: [id, name, last_used_at, expires_at, revoked_at, current]
       properties:
         id:           { type: string }
-        name:         { type: [string, "null"], description: "Caller-set label e.g. \"laptop\"." }
-        last_used_at: { type: [string, "null"], format: date-time }
+        name:         { type: string, nullable: true, description: "Caller-set label e.g. \"laptop\"." }
+        last_used_at: { type: string, nullable: true, format: date-time }
         expires_at:   { type: string, format: date-time }
-        revoked_at:   { type: [string, "null"], format: date-time }
+        revoked_at:   { type: string, nullable: true, format: date-time }
         current:      { type: boolean, description: "True iff this is the key used to authenticate the current request." }
 
     ServerSummary:
@@ -2185,7 +2373,7 @@ components:
         role:
           type: string
           enum: [owner, admin]
-        granted_by_admin_id: { type: [string, "null"] }
+        granted_by_admin_id: { type: string, nullable: true }
         joined_at:           { type: string, format: date-time }
 
     Invitation:
@@ -2215,10 +2403,10 @@ components:
       description: Returned by `PATCH /servers/{id}/me`.
       required: [handle, real_name, stats, title]
       properties:
-        handle:    { type: [string, "null"] }
-        real_name: { type: [string, "null"] }
+        handle:    { type: string, nullable: true }
+        real_name: { type: string, nullable: true }
         stats:     { $ref: "#/components/schemas/PlayerStats" }
-        title:     { type: [string, "null"], description: "Rendered inline title per §17.4, e.g. `[Champion of Aldermarch ×2]`." }
+        title:     { type: string, nullable: true, description: "Rendered inline title per §17.4, e.g. `[Champion of Aldermarch ×2]`." }
 
     PlayerProfileRead:
       type: object
@@ -2226,9 +2414,9 @@ components:
       required: [handle, real_name, stats, title, joined_at]
       properties:
         handle:    { type: string }
-        real_name: { type: [string, "null"] }
+        real_name: { type: string, nullable: true }
         stats:     { $ref: "#/components/schemas/PlayerStats" }
-        title:     { type: [string, "null"] }
+        title:     { type: string, nullable: true }
         joined_at: { type: string, format: date-time }
 
     PlayerStats:
@@ -2271,7 +2459,7 @@ components:
         status: { type: string, enum: [proposed, grace, active, archived, cancelled] }
         min_players: { type: integer }
         t0_at: { type: string, format: date-time }
-        grace_closes_at: { type: [string, "null"], format: date-time }
+        grace_closes_at: { type: string, nullable: true, format: date-time }
         region_count: { type: integer }
         kingdom_count: { type: integer }
         my_kingdom: { $ref: "#/components/schemas/Kingdom" }
@@ -2290,10 +2478,38 @@ components:
         min_players: { type: integer }
         auto_cancel_after_hours: { type: integer }
         t0_at: { type: string, format: date-time }
-        grace_closes_at: { type: [string, "null"], format: date-time }
-        archived_at: { type: [string, "null"], format: date-time }
-        cancelled_at: { type: [string, "null"], format: date-time }
-        wonder_name: { type: [string, "null"] }
+        grace_closes_at: { type: string, nullable: true, format: date-time }
+        archived_at: { type: string, nullable: true, format: date-time }
+        cancelled_at: { type: string, nullable: true, format: date-time }
+        wonder_name: { type: string, nullable: true }
+
+    WorldSummary:
+      type: object
+      description: |
+        Lean player-side world entry used by `GET /servers/{id}/worlds`. Omits
+        `region_count`/`kingdom_count` and `my_kingdom` (use `GET /worlds/{id}`
+        for full detail). Includes lifecycle timestamps so listings can show
+        archived/cancelled state.
+      required:
+        - id
+        - server_id
+        - name
+        - slug
+        - status
+        - min_players
+        - t0_at
+      properties:
+        id: { type: string }
+        server_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [proposed, grace, active, archived, cancelled] }
+        min_players: { type: integer }
+        t0_at: { type: string, format: date-time }
+        grace_closes_at: { type: string, nullable: true, format: date-time }
+        archived_at: { type: string, nullable: true, format: date-time }
+        cancelled_at: { type: string, nullable: true, format: date-time }
+        wonder_name: { type: string, nullable: true }
 
     Kingdom:
       type: object
@@ -2302,7 +2518,8 @@ components:
         id: { type: string }
         world_id: { type: string }
         home_region_id:
-          type: [string, "null"]
+          type: string
+          nullable: true
           description: Nil while the world is `proposed`; assigned at `Worlds::Start` or at join during `grace`.
         stockpiles:
           type: object
@@ -2333,7 +2550,7 @@ components:
         - type: object
           properties:
             base_rate: { type: integer }
-            owner_kingdom_id: { type: [string, "null"] }
+            owner_kingdom_id: { type: string, nullable: true }
             region_id: { type: string }
             region_name: { type: string }
             garrison:
@@ -2364,8 +2581,8 @@ components:
           type: object
           additionalProperties: { type: integer }
         claimed: { type: boolean }
-        claimed_by_kingdom_id: { type: [string, "null"] }
-        claimed_at: { type: [string, "null"], format: date-time }
+        claimed_by_kingdom_id: { type: string, nullable: true }
+        claimed_at: { type: string, nullable: true, format: date-time }
 
     RegionSummary:
       type: object
@@ -2385,9 +2602,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/NodeSummary" }
         ruin:
-          oneOf:
+          type: object
+          nullable: true
+          allOf:
             - { $ref: "#/components/schemas/RuinSummary" }
-            - { type: "null" }
 
     Region:
       type: object
@@ -2406,10 +2624,11 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Node" }
         ruin:
-          oneOf:
+          type: object
+          nullable: true
+          allOf:
             - { $ref: "#/components/schemas/Ruin" }
-            - { type: "null" }
-        owner_kingdom_id: { type: [string, "null"] }
+        owner_kingdom_id: { type: string, nullable: true }
 
     WorldInvitation:
       type: object
@@ -2449,8 +2668,97 @@ components:
         target_level: { type: integer, minimum: 1, maximum: 20 }
         started_at: { type: string, format: date-time }
         completes_at: { type: string, format: date-time }
-        completed_at: { type: [string, "null"], format: date-time }
-        cancelled_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: string, nullable: true, format: date-time }
+        cancelled_at: { type: string, nullable: true, format: date-time }
+
+    BuildingUpgradePreview:
+      type: object
+      required:
+        [ kind, current_level, target_level, at_max_level, cost,
+          duration_seconds, tier_gates_met, tier_gates_unmet, affordable, missing ]
+      properties:
+        kind:
+          type: string
+          enum:
+            [ town_hall, gold_mint, lumber_camp, quarry, iron_mine, warehouse,
+              barracks, stable, siege_workshop, walls, watchtower, stone_mason ]
+        current_level: { type: integer, minimum: 0, maximum: 20 }
+        target_level:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 20
+          description: Next level (`current_level + 1`), or `null` when at max level.
+        at_max_level: { type: boolean }
+        cost:
+          description: Resource cost for the upgrade, or `null` when at max level.
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/StockpileMap"
+        duration_seconds:
+          type: integer
+          nullable: true
+          description: |
+            Upgrade duration after Stone Mason discount, or `null` when at max
+            level.
+        tier_gates_met: { type: boolean }
+        tier_gates_unmet:
+          type: array
+          description: Tier prerequisites the kingdom does not yet satisfy.
+          items:
+            type: object
+            required: [kind, required_level, current_level]
+            properties:
+              kind: { type: string }
+              required_level: { type: integer, minimum: 1 }
+              current_level: { type: integer, minimum: 0 }
+        affordable:
+          type: boolean
+          description: True iff the current stockpile covers the full cost.
+        missing:
+          $ref: "#/components/schemas/StockpileMap"
+          description: Per-resource shortfall (0 if no shortfall).
+
+    KingdomBuilding:
+      description: |
+        A `BuildingUpgradePreview` extended with the building's id, an
+        `upgrade_possible` flag, and the in-progress `build_order` (if any) for
+        that building.
+      allOf:
+        - $ref: "#/components/schemas/BuildingUpgradePreview"
+        - type: object
+          required: [id, upgrade_possible, build_order]
+          properties:
+            id:
+              type: string
+              nullable: true
+              description: |
+                Id of the underlying `Building` record. `null` only on the rare
+                bootstrap edge case where the kingdom has no row for this kind.
+            upgrade_possible:
+              type: boolean
+              description: |
+                `true` iff `at_max_level == false` AND `tier_gates_met == true`
+                AND `affordable == true` AND `build_order == null`.
+            build_order:
+              description: In-progress `BuildOrder` for this building, or `null`.
+              type: object
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/BuildOrder"
+
+    KingdomBuildingsList:
+      type: object
+      required: [kingdom_id, buildings]
+      properties:
+        kingdom_id:
+          type: string
+          description: Echoes the path parameter for client-side reference.
+        buildings:
+          type: array
+          description: One entry per building kind, sorted alphabetically by `kind`.
+          items: { $ref: "#/components/schemas/KingdomBuilding" }
 
     StockpileMap:
       type: object
@@ -2480,12 +2788,12 @@ components:
       properties:
         id: { type: string }
         world_id: { type: string }
-        home_region_id: { type: [string, "null"] }
+        home_region_id: { type: string, nullable: true }
         stockpiles: { $ref: "#/components/schemas/StockpileMap" }
         warehouse_cap: { type: integer }
         production_rates: { $ref: "#/components/schemas/ProductionRates" }
         joined_at: { type: string, format: date-time }
-        eliminated_at: { type: [string, "null"], format: date-time }
+        eliminated_at: { type: string, nullable: true, format: date-time }
         buildings:
           type: array
           items: { $ref: "#/components/schemas/Building" }
@@ -2519,8 +2827,51 @@ components:
         count: { type: integer, minimum: 1 }
         started_at: { type: string, format: date-time }
         completes_at: { type: string, format: date-time }
-        completed_at: { type: [string, "null"], format: date-time }
-        cancelled_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: string, nullable: true, format: date-time }
+        cancelled_at: { type: string, nullable: true, format: date-time }
+
+    TrainingPreview:
+      type: object
+      required:
+        [ building_kind, unit, count, building_level, building_built,
+          unit_trainable_here, per_unit_cost, total_cost,
+          per_unit_seconds, total_seconds, affordable, missing,
+          max_affordable_count ]
+      properties:
+        building_kind:
+          type: string
+          enum: [barracks, stable, siege_workshop]
+        unit: { $ref: "#/components/schemas/Unit" }
+        count: { type: integer, minimum: 1 }
+        building_level:
+          type: integer
+          minimum: 0
+          description: 0 if the building has not been built yet.
+        building_built: { type: boolean }
+        unit_trainable_here:
+          type: boolean
+          description: True iff `unit` is allowed at `building_kind` (advisory).
+        per_unit_cost: { $ref: "#/components/schemas/StockpileMap" }
+        total_cost:
+          $ref: "#/components/schemas/StockpileMap"
+          description: per_unit_cost × count.
+        per_unit_seconds:
+          type: integer
+          description: Training time per unit at the current building level.
+        total_seconds:
+          type: integer
+          description: per_unit_seconds × count.
+        affordable: { type: boolean }
+        missing:
+          $ref: "#/components/schemas/StockpileMap"
+          description: Per-resource shortfall against the current stockpile (0 if covered).
+        max_affordable_count:
+          type: integer
+          minimum: 0
+          description: |
+            Largest count the current stockpile can fully fund, computed as
+            `min(stockpile[r] // per_unit_cost[r])` across resources where the
+            per-unit cost is positive.
 
     Composition:
       type: object
@@ -2560,8 +2911,8 @@ components:
           items: { type: string }
         dispatched_at: { type: string, format: date-time }
         arrives_at: { type: string, format: date-time }
-        arrived_at: { type: [string, "null"], format: date-time }
-        recalled_at: { type: [string, "null"], format: date-time }
+        arrived_at: { type: string, nullable: true, format: date-time }
+        recalled_at: { type: string, nullable: true, format: date-time }
 
     # ─── Phase 6: battles ──────────────────────────────────────────────────────
 
@@ -2593,9 +2944,9 @@ components:
         region_id: { type: string }
         attacker_kingdom_id: { type: string }
         defender_kingdom_id: { type: string }
-        attacker_title: { type: [string, "null"], description: "Rendered title for the attacker (§17.4)." }
-        defender_title: { type: [string, "null"], description: "Rendered title for the defender (§17.4)." }
-        march_order_id: { type: [string, "null"] }
+        attacker_title: { type: string, nullable: true, description: "Rendered title for the attacker (§17.4)." }
+        defender_title: { type: string, nullable: true, description: "Rendered title for the defender (§17.4)." }
+        march_order_id: { type: string, nullable: true }
         outcome:
           type: string
           enum: [attacker_victory, defender_victory, attacker_rout, defender_rout]
@@ -2618,7 +2969,7 @@ components:
         id: { type: string }
         battle_id: { type: string }
         kingdom_id: { type: string }
-        army_id: { type: [string, "null"] }
+        army_id: { type: string, nullable: true }
         side: { type: string, enum: [attacker, defender] }
         starting_composition: { $ref: "#/components/schemas/Composition" }
         ending_composition: { $ref: "#/components/schemas/Composition" }
@@ -2657,10 +3008,10 @@ components:
             wins.
         dispatched_at: { type: string, format: date-time }
         arrives_at:    { type: string, format: date-time }
-        delivered_at:   { type: [string, "null"], format: date-time }
-        intercepted_at: { type: [string, "null"], format: date-time }
-        outbound_march_order_id: { type: [string, "null"] }
-        return_march_order_id:   { type: [string, "null"] }
+        delivered_at:   { type: string, nullable: true, format: date-time }
+        intercepted_at: { type: string, nullable: true, format: date-time }
+        outbound_march_order_id: { type: string, nullable: true }
+        return_march_order_id:   { type: string, nullable: true }
 
     TradeLedgerEntry:
       type: object
@@ -2674,7 +3025,7 @@ components:
         caravan_id: { type: string }
         sender_handle:   { type: string, description: "Sender handle snapshotted at dispatch." }
         receiver_handle: { type: string, description: "Receiver handle snapshotted at dispatch." }
-        attacker_handle: { type: [string, "null"], description: "Interceptor handle (intercepted entries only)." }
+        attacker_handle: { type: string, nullable: true, description: "Interceptor handle (intercepted entries only)." }
         resource:
           type: string
           enum: [gold, wood, stone, iron]
@@ -2710,13 +3061,15 @@ components:
             "50": { type: boolean }
             "75": { type: boolean }
         pending_milestone_percent:
-          type: [integer, "null"]
+          type: integer
+          nullable: true
           enum: [25, 50, 75, null]
           description: |
             Non-null when construction is paused at a milestone threshold awaiting
             payment. Player must POST /wonder/milestone {percent} to resume.
         pending_milestone_cost:
-          type: [object, "null"]
+          type: object
+          nullable: true
           description: Per-resource cost of the pending milestone payment (null if none pending).
           additionalProperties: { type: integer, minimum: 0 }
         repaired_hp_by_phase:
@@ -2726,12 +3079,12 @@ components:
             foundation:   { type: integer, minimum: 0 }
             construction: { type: integer, minimum: 0 }
             consecration: { type: integer, minimum: 0 }
-        paused_until:           { type: [string, "null"], format: date-time, description: "Set by repairs — construction resumes after this timestamp." }
+        paused_until:           { type: string, nullable: true, format: date-time, description: "Set by repairs — construction resumes after this timestamp." }
         started_at:             { type: string, format: date-time }
-        construction_started_at: { type: [string, "null"], format: date-time }
-        consecration_at:        { type: [string, "null"], format: date-time }
-        completed_at:           { type: [string, "null"], format: date-time }
-        destroyed_at:           { type: [string, "null"], format: date-time }
+        construction_started_at: { type: string, nullable: true, format: date-time }
+        consecration_at:        { type: string, nullable: true, format: date-time }
+        completed_at:           { type: string, nullable: true, format: date-time }
+        destroyed_at:           { type: string, nullable: true, format: date-time }
 
     WonderListItem:
       type: object
@@ -2749,9 +3102,9 @@ components:
         target_hp: { type: integer, minimum: 1 }
         hp_pct: { type: integer, minimum: 0, maximum: 100 }
         started_at:      { type: string, format: date-time }
-        consecration_at: { type: [string, "null"], format: date-time }
-        completed_at:    { type: [string, "null"], format: date-time }
-        destroyed_at:    { type: [string, "null"], format: date-time }
+        consecration_at: { type: string, nullable: true, format: date-time }
+        completed_at:    { type: string, nullable: true, format: date-time }
+        destroyed_at:    { type: string, nullable: true, format: date-time }
 
     WonderStartRequest:
       type: object
@@ -2790,8 +3143,8 @@ components:
       required: [world_id, ended_at, frozen_state]
       properties:
         world_id:          { type: string }
-        winner_kingdom_id: { type: [string, "null"] }
-        wonder_name:       { type: [string, "null"] }
+        winner_kingdom_id: { type: string, nullable: true }
+        wonder_name:       { type: string, nullable: true }
         ended_at:          { type: string, format: date-time }
         frozen_state:      { $ref: "#/components/schemas/FrozenState" }
 
@@ -2820,32 +3173,31 @@ components:
             required: [id, handle, home_region_id, final_stockpiles, building_levels, peak_nodes, final_node_count, joined_at]
             properties:
               id:               { type: string }
-              handle:           { type: [string, "null"] }
-              real_name:        { type: [string, "null"] }
-              home_region_id:   { type: [string, "null"] }
+              handle:           { type: string, nullable: true }
+              real_name:        { type: string, nullable: true }
+              home_region_id:   { type: string, nullable: true }
               final_stockpiles: { $ref: "#/components/schemas/StockpileMap" }
               building_levels:
                 type: object
                 additionalProperties: { type: integer, minimum: 0 }
               peak_nodes:       { type: integer, minimum: 0 }
               final_node_count: { type: integer, minimum: 0 }
-              joined_at:        { type: [string, "null"], format: date-time }
-              eliminated_at:    { type: [string, "null"], format: date-time }
+              joined_at:        { type: string, nullable: true, format: date-time }
+              eliminated_at:    { type: string, nullable: true, format: date-time }
         wonder:
-          oneOf:
-            - type: "null"
-            - type: object
-              required: [kingdom_id, name, status, hp, target_hp]
-              properties:
-                kingdom_id:           { type: string }
-                name:                 { type: string }
-                status:               { type: string, enum: [foundation, construction, consecration, completed, destroyed] }
-                hp:                   { type: integer, minimum: 0 }
-                target_hp:            { type: integer, minimum: 1 }
-                damage_events_count:  { type: integer, minimum: 0 }
-                started_at:           { type: [string, "null"], format: date-time }
-                completed_at:         { type: [string, "null"], format: date-time }
-                destroyed_at:         { type: [string, "null"], format: date-time }
+          nullable: true
+          type: object
+          required: [kingdom_id, name, status, hp, target_hp]
+          properties:
+            kingdom_id:           { type: string }
+            name:                 { type: string }
+            status:               { type: string, enum: [foundation, construction, consecration, completed, destroyed] }
+            hp:                   { type: integer, minimum: 0 }
+            target_hp:            { type: integer, minimum: 1 }
+            damage_events_count:  { type: integer, minimum: 0 }
+            started_at:           { type: string, nullable: true, format: date-time }
+            completed_at:         { type: string, nullable: true, format: date-time }
+            destroyed_at:         { type: string, nullable: true, format: date-time }
         battles_count:  { type: integer, minimum: 0 }
         caravans_count: { type: integer, minimum: 0 }
         nodes_count:    { type: integer, minimum: 0 }
@@ -2865,7 +3217,7 @@ components:
       type: object
       required: [snapshot_at, entries]
       properties:
-        snapshot_at: { type: [string, "null"], format: date-time }
+        snapshot_at: { type: string, nullable: true, format: date-time }
         entries:
           type: array
           items: { $ref: "#/components/schemas/LeaderboardEntry" }
@@ -2874,9 +3226,9 @@ components:
       type: object
       required: [player_profile_id, handle, score, secondary]
       properties:
-        player_profile_id: { type: [string, "null"] }
-        handle:            { type: [string, "null"] }
+        player_profile_id: { type: string, nullable: true }
+        handle:            { type: string, nullable: true }
         score:             { type: integer, minimum: 0 }
         secondary:         { type: integer, minimum: 0 }
-        title:             { type: [string, "null"] }
+        title:             { type: string, nullable: true }
 
