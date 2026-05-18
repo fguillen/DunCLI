@@ -24,13 +24,27 @@ go install github.com/fguillen/dun-cli/cmd/dun@latest
 
 ## Quickstart
 
+`dun-cli` is an interactive shell in the spirit of `psql` or `mongosh`:
+`dun login` authenticates and drops you into a `dun>` prompt where every
+game action is a verb.
+
 ```bash
-dun login          # request a magic link to your email, paste it back
-dun tui            # launch the TUI
+$ dun login alice@example.com
+Magic link sent. Paste token: ************
+Welcome, IronFist.
+
+dun> servers
+dun> world join spring-2026
+dun> kingdom build barracks 5
+dun> quit
 ```
 
-`dun login` is wired in Phase 2 (auth & account). Until then,
-`dun tui` runs the splash. Press `q` to quit.
+See [PRODUCT.md](PRODUCT.md) "Interaction model" for the full UX
+shape, and [TODO.md](TODO.md) for what's implemented per phase.
+
+**Current state:** Phase 0 ships a placeholder splash at `dun tui`
+(press `q` to quit) to prove the build chain. `dun login` lands in
+Phase 2; the REPL shell lands in Phase 3.
 
 ## Configuration
 

@@ -5,6 +5,14 @@ references the relevant `operationId`s from
 [docs/backend/openapi.yaml](docs/backend/openapi.yaml) so they're
 greppable. Each phase builds on the previous.
 
+**Interaction model.** Every command from Phase 4 onwards ships as a
+verb inside the interactive shell built in Phase 3 (e.g. `servers`,
+`world join`, `kingdom build`), not as a `dun servers list`-style
+one-shot. See [PRODUCT.md](PRODUCT.md) "Interaction model" for the
+rationale and [CLAUDE.md](CLAUDE.md) "Interaction model — REPL, not
+full-screen TUI" for implementation rules. Entity references are by
+name/slug, not ULID — see CLAUDE.md "Entity identification".
+
 **v1 scope is player surface only.** The following admin operationIds
 are explicitly **out of scope** for v1 and will be revisited later:
 `requestAdminMagicLink`, `exchangeAdminMagicLink`, `listAdminApiKeys`,
@@ -29,6 +37,8 @@ are explicitly **out of scope** for v1 and will be revisited later:
       `clean`, `help`
 - [x] `internal/log/`: slog JSON logger to `$XDG_STATE_HOME/dun-cli/`
 - [x] `cmd/dun/`: cobra root + `version` + `tui` subcommands
+      *(Note: `tui` is a Phase 0 placeholder splash. Phase 3 replaces
+      it with the real REPL shell.)*
 - [x] `internal/tui/`: Bubble Tea splash with snapshot test
 - [x] `CLAUDE.md`, `PRODUCT.md`, `README.md`, `TODO.md`
 - [ ] GitHub Actions CI: matrix on linux + macos, Go current + previous;
@@ -55,8 +65,17 @@ No new endpoints — just the plumbing every later phase consumes.
       silently (let the UI decide)
 - [ ] Context cancellation: every wrapper method takes `context.Context`
       and threads it into the generated client
+- [ ] Entity resolvers: `ResolveServer(slug)`, `ResolveWorld(slug)`,
+      `ResolveKingdom(handle)`, `ResolveRegion(name)`, `ResolveArmy(name)`,
+      `ResolvePlayer(handle)` — each backed by the relevant `list*` /
+      `show*` endpoint with a per-session memoization cache that the
+      shell owns. Returns the ULID for downstream calls. See
+      CLAUDE.md "Entity identification". Mutations
+      (`joinServer`, `joinWorld`, `splitArmy`, `renameArmy`,
+      `mergeArmy`) must invalidate the relevant cache.
 - [ ] Tests: `httptest.Server` exercising the auth header, the error
-      decoder, request-id capture, and 429 path
+      decoder, request-id capture, the 429 path, and resolver
+      cache invalidation
 
 ## Phase 2 — Auth & account
 
@@ -80,75 +99,106 @@ operationIds: `requestPlayerMagicLink`, `exchangePlayerMagicLink`,
 - [ ] Tests: stubbed backend covering happy path, expired token, wrong
       scope (401), and keychain-unavailable fallback
 
-## Phase 3 — TUI shell
+## Phase 3 — Interactive shell (REPL)
 
 No new player endpoints. Uses `getHealth` for a connectivity probe on
-startup.
+startup. Replaces the Phase 0 splash with a long-running `dun>` prompt
+in the spirit of psql / mongosh / redis-cli. The shell does **not**
+use alt-screen; scrollback is preserved. Individual commands may pop
+up transient Bubble Tea selectors (alt-screen ok there).
 
-- [ ] Screen stack: push/pop/replace, with a clean "back" gesture
-- [ ] Status bar: shows current screen, connection state, key hints
-- [ ] Help overlay (`?`): renders the active screen's keymap
-- [ ] Theme: Lipgloss palette in [internal/tui/theme/](internal/tui/theme/);
-      light + dark variants
-- [ ] Global keymap: `q` quit, `?` help, `r` refresh, arrows + `j/k`
-      navigation, `g/G` first/last
-- [ ] Toast system: success / warning / error, surfaces `X-Request-Id`
-      on errors
-- [ ] Connectivity probe: `getHealth` on startup; if backend is down
-      show a clear "backend unreachable" state instead of a hung spinner
-- [ ] Tests: screen-stack unit tests + `teatest` snapshots for status
-      bar and help overlay
+- [ ] Delete the Phase 0 splash (`internal/tui/splash.go`,
+      `splash_test.go`); the `dun tui` subcommand becomes a thin
+      wrapper that enters the shell (or is renamed to `dun shell` and
+      the bare `dun` invocation also enters the shell — decide during
+      implementation)
+- [ ] Prompt component: line editor with persistent history
+      (`$XDG_DATA_HOME/dun-cli/history`), `dun>` prefix, multi-line
+      input where useful, Ctrl-C to abort current line, Ctrl-D to exit
+- [ ] Command dispatcher: parse the typed line into
+      (verb, subverb, positional args, flags); route to the
+      registered handler; pretty-print the result to scrollback
+- [ ] Built-in shell commands: `help [verb]`, `quit` / `exit`,
+      `clear`, `version`, `whoami`, `where` (current
+      server/world/kingdom context), `use <server-slug>` /
+      `use world <slug>` to scope subsequent commands
+- [ ] Tab completion engine: pluggable per-verb. Static for keywords
+      and enums (building kinds, unit kinds, intents); dynamic for
+      entity references via the Phase 1 `Resolve*` helpers
+- [ ] Interactive selector primitive: list-of-strings picker built on
+      `charmbracelet/bubbles/list`; reused by every later phase when
+      typed input would be tedious
+- [ ] Form primitive: multi-field input built on `charmbracelet/huh`
+      for things like march dispatch (target region + intent) and
+      caravan build (receiver + payload + escort). **Add dep first.**
+- [ ] Theme: Lipgloss palette in
+      [internal/tui/theme/](internal/tui/theme/); light + dark
+      variants applied to selectors, forms, and command output
+- [ ] Connectivity probe: `getHealth` once on shell start; surface a
+      clear "backend unreachable: <url>" state on failure with the
+      relevant `X-Request-Id` and exit code
+- [ ] Error rendering: every command failure prints
+      `error: <human message> (code=<code>, request_id=<id>)` to
+      scrollback; toast-style overlays only for selectors/forms
+- [ ] Session context: shell remembers (server, world, kingdom)
+      tuple; verbs default to the in-scope entity when not specified
+- [ ] Tests: dispatcher table-driven; completion engine unit tests;
+      `teatest` snapshots for the prompt model and selector primitive
 
 ## Phase 4 — Server membership
 
 operationIds: `listPlayerServers`, `joinServer`, `updateOwnProfile`,
 `showPlayerProfile`.
 
-- [ ] Servers list screen: `listPlayerServers`, member vs eligible split
-- [ ] Join confirmation flow: `joinServer` for invite-only servers
-- [ ] Profile editor: `updateOwnProfile` (handle + real name), respects
-      §17.1 validation rules and the `handle_locked` guard
-- [ ] Player profile viewer: `showPlayerProfile` (by handle, on a server
-      the caller is a member of)
-- [ ] Server picker as the post-login default screen
+- [ ] `servers` — `listPlayerServers`, member vs eligible split
+- [ ] `server join <slug>` — `joinServer` for invite-only servers
+- [ ] `profile set [--handle X] [--real-name "Y"]` — `updateOwnProfile`,
+      respects §17.1 validation rules and the `handle_locked` guard
+- [ ] `player show <handle>` — `showPlayerProfile` (on the in-scope
+      server)
+- [ ] Post-login default: drop into shell with the server picker open
+      if the player has > 1 server membership
 
 ## Phase 5 — World browse & join
 
 operationIds: `listServerWorlds`, `showWorld`, `joinWorld`.
 
-- [ ] World list screen per server: `listServerWorlds`
-- [ ] World detail: `showWorld` (T0/grace timestamps, region/kingdom
-      counts, caller's kingdom)
-- [ ] Join flow: `joinWorld` (proposed/grace states); surface §16.7
-      admission errors and the §16.8 late-joiner bonus
+- [ ] `worlds` — `listServerWorlds` for the in-scope server
+- [ ] `world show <slug>` — `showWorld` (T0/grace timestamps,
+      region/kingdom counts, caller's kingdom)
+- [ ] `world join <slug>` — `joinWorld` (proposed/grace states);
+      surface §16.7 admission errors and the §16.8 late-joiner bonus
 
 ## Phase 6 — Map & regions
 
 operationIds: `showWorldMap`, `showRegion`, `showRegionAdjacent`,
 `listRuins`, `listNodes`, `showNode`.
 
-- [ ] Map screen: `showWorldMap` rendered as an ASCII region graph
-      (terrain glyphs per `Plains/Forest/Hills/Mountain/Marsh`)
-- [ ] Region detail pane: `showRegion`, with `showRegionAdjacent`
-      driving "step into neighbor" navigation
-- [ ] Ruins overlay: `listRuins`
-- [ ] Nodes overlay: `listNodes` (wilderness / captured / home hoard);
-      detail via `showNode`
+- [ ] `map` — `showWorldMap` rendered as an ASCII region graph for
+      the in-scope world (terrain glyphs per
+      `Plains/Forest/Hills/Mountain/Marsh`); transient alt-screen
+      view with arrow-key navigation
+- [ ] `region show <name>` — `showRegion`; `showRegionAdjacent`
+      drives "step into neighbor" navigation inside the map view
+- [ ] `ruins` — `listRuins` for the in-scope world
+- [ ] `nodes [--owner mine|wild|captured|home-hoard]` — `listNodes`;
+      `node show <id-or-region>` for detail via `showNode`
 
 ## Phase 7 — Kingdom dashboard & economy
 
 operationIds: `showKingdom`, `listKingdomBuildings`, `previewBuildUpgrade`,
 `queueBuildOrder`, `cancelBuildOrder`.
 
-- [ ] Kingdom dashboard: `showKingdom` (stockpile, production rates,
-      in-progress orders)
-- [ ] Buildings list: `listKingdomBuildings` with `upgrade_possible`
-      filter
-- [ ] Upgrade preview pane: `previewBuildUpgrade` (cost, duration, tier
-      gates, affordability)
-- [ ] Queue upgrade action: `queueBuildOrder` (defensive `target_level`
-      check)
-- [ ] Cancel upgrade action: `cancelBuildOrder` (75% refund, time lost)
+- [ ] `kingdom` / `kingdom show` — `showKingdom` (stockpile,
+      production rates, in-progress orders)
+- [ ] `buildings [--upgradable]` — `listKingdomBuildings`
+- [ ] `build preview <kind>` — `previewBuildUpgrade` (cost, duration,
+      tier gates, affordability)
+- [ ] `build <kind>` — interactive selector for kind if omitted,
+      confirms preview, calls `queueBuildOrder` with defensive
+      `target_level` check
+- [ ] `build cancel <id-or-kind>` — `cancelBuildOrder` (75% refund,
+      time lost); confirms before calling
 
 ## Phase 8 — Military
 
@@ -156,27 +206,32 @@ operationIds: `queueTrainingOrder`, `previewTrainingOrder`,
 `cancelTrainingOrder`, `listKingdomArmies`, `showArmy`, `splitArmy`,
 `renameArmy`, `mergeArmy`, `dispatchMarch`, `recallMarch`.
 
-- [ ] Training preview pane: `previewTrainingOrder` per
-      barracks / stable / siege_workshop
-- [ ] Queue training: `queueTrainingOrder` (per-building FIFO)
-- [ ] Cancel training: `cancelTrainingOrder` (75% refund)
-- [ ] Armies list: `listKingdomArmies`
-- [ ] Army detail: `showArmy` (composition, active march, region)
-- [ ] Split / rename / merge actions: `splitArmy`, `renameArmy`,
-      `mergeArmy` (home-only invariants)
-- [ ] March dispatch: `dispatchMarch` with intent selector
-      (`attack | reinforce | scout | capture | claim_ruin | caravan`)
-- [ ] March recall: `recallMarch` (no unit losses in v1)
+- [ ] `train preview <building> <unit> <count>` —
+      `previewTrainingOrder`
+- [ ] `train <building> <unit> <count>` — `queueTrainingOrder`
+      (per-building FIFO); selector for unit if omitted
+- [ ] `train cancel <id>` — `cancelTrainingOrder` (75% refund)
+- [ ] `armies` — `listKingdomArmies`
+- [ ] `army show <name>` — `showArmy` (composition, active march,
+      region)
+- [ ] `army split <name>` — `splitArmy` (home-only invariants); form
+      for new-army name + units
+- [ ] `army rename <name> <new-name>` — `renameArmy`
+- [ ] `army merge <name> --into <name>` — `mergeArmy`
+- [ ] `march <army> <target-region> <intent>` — `dispatchMarch`;
+      intent selector for `attack | reinforce | scout | capture |
+      claim_ruin | caravan` if omitted
+- [ ] `recall <army>` — `recallMarch` (no unit losses in v1)
 
 ## Phase 9 — Combat & battle reports
 
 operationIds: `listKingdomBattles`, `showBattle`.
 
-- [ ] Battles list: `listKingdomBattles` with `limit` / `offset`
-      pagination
-- [ ] Battle detail: `showBattle` with round-by-round log + participants
-- [ ] Wilderness battles (Phase 7 capture flows) shown distinctly when
-      `defender_kingdom_id` is null
+- [ ] `battles [--limit N] [--offset N]` — `listKingdomBattles`
+- [ ] `battle show <id>` — `showBattle` with round-by-round log +
+      participants
+- [ ] Wilderness battles (Phase 7 capture flows) shown distinctly in
+      the list when `defender_kingdom_id` is null
 
 ## Phase 10 — Nodes & ruins capture flows
 
@@ -194,33 +249,38 @@ Phase 8 (march dispatch with `capture` / `claim_ruin` intents).
 
 operationIds: `dispatchCaravan`, `listTradeLedger`.
 
-- [ ] Caravan dispatch screen: `dispatchCaravan` (receiver handle,
-      source army, payload, escort units; capacity validation)
-- [ ] Trade ledger: `listTradeLedger` with `?player` / `?since` /
-      `?limit` / `?page` filters
-- [ ] Interception outcomes surfaced via the battle stream from Phase 9
+- [ ] `caravan send <receiver-handle>` — `dispatchCaravan`; opens a
+      form for source army + payload + escort units with capacity
+      validation
+- [ ] `trade ledger [--player H] [--since 24h] [--limit N] [--page N]` —
+      `listTradeLedger`
+- [ ] Interception outcomes surfaced via the battle stream from
+      Phase 9
 
 ## Phase 12 — Wonders
 
 operationIds: `getWonder`, `startWonder`, `cancelWonder`, `repairWonder`,
 `payWonderMilestone`, `listWorldWonders`.
 
-- [ ] Wonder dashboard: `getWonder` (lazy `Wonders::ApplyConstruction`)
-- [ ] Start Wonder: `startWonder` (name from §14 fixed menu, 25%
-      foundation payment)
-- [ ] Pay milestones: `payWonderMilestone` (25 / 50 / 75)
-- [ ] Repair: `repairWonder` (1 HP per 8 Stone; 2000 HP/phase cap)
-- [ ] Cancel: `cancelWonder` (paid resources lost — double-confirm)
-- [ ] World Wonders list: `listWorldWonders` (public)
+- [ ] `wonder` / `wonder show` — `getWonder` (lazy
+      `Wonders::ApplyConstruction`)
+- [ ] `wonder start <name>` — `startWonder`; selector for name from
+      the §14 fixed menu; 25% foundation payment with confirm
+- [ ] `wonder milestone <25|50|75>` — `payWonderMilestone`
+- [ ] `wonder repair <hp>` — `repairWonder` (1 HP per 8 Stone;
+      2000 HP/phase cap)
+- [ ] `wonder cancel` — `cancelWonder` (paid resources lost —
+      double-confirm with typed name to match)
+- [ ] `wonders` — `listWorldWonders` (public, in-scope world)
 
 ## Phase 13 — Archive & Hall of Fame
 
 operationIds: `getWorldArchive`, `getHallOfFame`.
 
-- [ ] World archive viewer: `getWorldArchive` (frozen end-of-round
-      snapshot; 404 while live is handled gracefully)
-- [ ] Hall of Fame: `getHallOfFame` with `?kind=` filter
-      (Champions / Wreckers / Warlords / Veterans)
+- [ ] `archive [<world-slug>]` — `getWorldArchive` (frozen
+      end-of-round snapshot; 404 while live handled gracefully)
+- [ ] `hall-of-fame [--kind champions|wreckers|warlords|veterans]` —
+      `getHallOfFame` for the in-scope server
 
 ## Phase 14 — Polish, packaging & distribution
 

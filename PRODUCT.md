@@ -43,6 +43,65 @@ A session is "30 seconds while my Docker build runs." Anything that
 costs the user a second of staring at a loading spinner is a design
 defect.
 
+## Interaction model
+
+`dun-cli` works like `psql`, `mongosh`, or `redis-cli` — a one-shot
+command drops the user into an interactive shell prompt where every
+game action is a command:
+
+```
+$ dun login alice@example.com
+Magic link sent. Paste token: ************
+Welcome, IronFist.
+
+dun> servers
+ *  acme           Acme Co               member
+    contoso        Contoso Eng           eligible
+dun> world join spring-2026
+Joined Spring 2026 (grace period, 71h remaining).
+dun> kingdom build barracks 5
+Queued: Barracks 4 → 5. ETA 2h 14m. Refund on cancel: 75%.
+dun> armies
+ *  Vanguard       knights:120 archers:80   home, region Greyhollow
+    Garrison       levy:240                 home, region Greyhollow
+dun> quit
+$
+```
+
+The shell is the primary interface. Why a REPL instead of one-shot
+subcommands or a full-screen TUI:
+
+- **Latency budget.** Re-launching a binary, re-reading the keychain,
+  and re-fetching server/world/kingdom context for every action burns
+  most of the 30-second session window. A persistent process keeps it
+  free.
+- **Conversational flow.** Most sessions are 3–10 actions in sequence
+  (check stockpile → preview build → confirm → check armies → recall
+  a march). A prompt makes that sequence feel natural; a CLI with one
+  binary invocation per command does not.
+- **Familiar to the target user.** Developers already live in psql,
+  irb, mongosh, jshell, redis-cli. Zero learning curve.
+
+Within the shell, individual commands may launch transient interactive
+selectors — server picker, region map, army composition form — when
+the input deserves a richer UI than typed args. These selectors are
+short-lived: they appear, the user picks, the result is printed back
+into the scrollback. The shell itself never lives in alt-screen.
+Scrollback is sacred — users will copy lines out of it.
+
+### Interaction requirements
+
+- **Tab completion** on every command, subcommand, flag, and entity
+  reference (server slugs, world slugs, kingdom names, region names,
+  army names, building kinds, unit kinds, wonder names).
+- **Interactive selectors / lists / pickers** for any multi-choice
+  input. Typed input is the fallback when the user knows exactly what
+  they want; pickers are the default for discovery.
+- **Name- or slug-based references everywhere.** The user types
+  `world join spring-2026` or `kingdom show IronFist`, not
+  `world join 01JF7NQM…`. ULIDs appear in error toasts and the log
+  file alongside `X-Request-Id` — never at the prompt.
+
 ## UX principles
 
 1. **Launch fast, always.** Cold start is on the critical path. Defer

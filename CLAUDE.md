@@ -81,6 +81,84 @@ scripts/                 # sync-backend-docs.sh
 - A flat endpoint index lives at
   [docs/backend/api-endpoints.md](docs/backend/api-endpoints.md).
 
+## Interaction model — REPL, not full-screen TUI
+
+See [PRODUCT.md](PRODUCT.md) "Interaction model" for the user-facing
+rationale. Implementation rules:
+
+- The `dun` entrypoint drops the user into an interactive shell prompt
+  after auth. The shell is the primary interface — there is **no**
+  `dun servers list`-style one-shot subcommand for game actions.
+- Cobra is used only for top-level operational commands that make
+  sense *outside* an authenticated session: `dun login`,
+  `dun logout`, `dun version`, `dun completion`. Everything else
+  (servers, worlds, kingdoms, armies, battles, trade, wonders) is a
+  verb inside the shell.
+- The shell prompt does **not** use `tea.WithAltScreen()` — terminal
+  scrollback must be preserved so users can copy/paste lines.
+- Individual game commands MAY launch a transient Bubble Tea program
+  (alt-screen ok there) for richer interactive input: list selectors,
+  forms, confirmations. They return control to the prompt when done
+  and the final result is printed back into scrollback as plain text.
+- Use `charmbracelet/bubbles` components (`list`, `textinput`, etc.)
+  for selectors. Use `charmbracelet/huh` for multi-field forms (added
+  when needed — ask first per the dependency rule).
+- Tab completion is mandatory on every command, subcommand, flag, and
+  entity reference. Completion sources are pluggable: static lists for
+  keywords, dynamic lookups for entity names/slugs via the resolvers
+  below.
+
+The Phase 0 `dun tui` subcommand is a placeholder splash to prove the
+build chain. Phase 3 (TODO.md) replaces it with the real REPL shell —
+delete the splash then.
+
+## Entity identification: names and slugs, not ULIDs
+
+Users always refer to game entities by human-readable name or slug:
+
+| Entity | User types | Resolves via |
+| :---- | :---- | :---- |
+| Server | `acme` (slug) | `listPlayerServers` |
+| World | `spring-2026` (slug) | `listServerWorlds` |
+| Player | `IronFist` (handle) | `showPlayerProfile` |
+| Region | `Greyhollow` (name) | `showWorldMap` |
+| Army | `Vanguard` (name) | `listKingdomArmies` |
+| Kingdom | `IronFist` (owner handle) | `listPlayerServers` + context |
+
+The `internal/api` wrapper (Phase 1) provides a `Resolve<Entity>(...)`
+helper for each, backed by the relevant `list*` / `show*` endpoint
+with a per-shell-session memoization cache. Resolvers invalidate on
+relevant mutations (e.g., `joinServer` invalidates the server cache).
+ULIDs only surface in error messages alongside `X-Request-Id` — never
+at the prompt.
+
+## Backend co-evolution
+
+The dun backend at github.com/fguillen/dun is actively developed and
+explicitly designed to support this client. When implementing a CLI
+command, if you notice any of the following, **surface it as a
+suggestion** — don't silently work around it in the CLI:
+
+- A required endpoint is missing for a screen we're building.
+- An endpoint returns too much data (forces client-side filtering) or
+  too little (forces N+1 follow-up calls).
+- A response shape is awkward to consume (e.g., missing a `name`
+  alongside an `id`, mixing flat and nested fields inconsistently).
+- A filter / sort / paging contract is inconsistent across similar
+  endpoints.
+- An error envelope `code` is too coarse for the UI message we'd want
+  to show.
+
+When you spot one, in the session: state the symptom, propose the
+minimal backend change that would fix it, and let the user decide
+whether to open an issue/PR against the backend or to ship a CLI-side
+workaround for now. **Default to surfacing; don't ship workarounds
+quietly.**
+
+The user can pass the suggestion to a Claude Code session in the
+backend repo — there's an established pattern for this (see the
+OpenAPI 3.1 → 3.0.3 downgrade as precedent).
+
 ## Conventions
 
 - **Errors**: backend uses the envelope
