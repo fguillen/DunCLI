@@ -305,3 +305,108 @@ func (c *Client) ListKingdomArmies(ctx context.Context, kingdomID string) ([]gen
 	)
 	return out, err
 }
+
+// RequestPlayerMagicLink enqueues a player magic-link email for the given
+// address. The response shape is identical whether or not a Player
+// already exists (no enumeration leak), so success here only means the
+// mailer was enqueued.
+func (c *Client) RequestPlayerMagicLink(ctx context.Context, email string) error {
+	return c.call(ctx, gen.RequestPlayerMagicLinkOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.RequestPlayerMagicLink(ctx, &gen.RequestPlayerMagicLinkReq{Email: email})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.RequestPlayerMagicLinkAccepted:
+				return nil
+			case *gen.ErrorEnvelope:
+				return fromEnvelope(v, rid)
+			}
+			return unexpectedRes(gen.RequestPlayerMagicLinkOperation, res)
+		},
+	)
+}
+
+// ExchangePlayerMagicLink consumes a magic-link token and returns the
+// freshly issued player ApiKey. The raw key is shown once; the caller is
+// responsible for persisting it (or losing it).
+func (c *Client) ExchangePlayerMagicLink(ctx context.Context, token string) (*gen.ExchangeResponse, error) {
+	var out *gen.ExchangeResponse
+	err := c.call(ctx, gen.ExchangePlayerMagicLinkOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ExchangePlayerMagicLink(ctx, &gen.ExchangePlayerMagicLinkReq{Token: token})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ExchangeResponse:
+				out = v
+				return nil
+			case *gen.ErrorEnvelope:
+				return fromEnvelope(v, rid)
+			}
+			return unexpectedRes(gen.ExchangePlayerMagicLinkOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ListPlayerAPIKeys returns every ApiKey the authenticated player has
+// issued (including revoked ones). `current: true` marks the key used to
+// authenticate the current request — that's how the CLI discovers its
+// own key id for `dun logout` and "is this the current one?" checks.
+func (c *Client) ListPlayerAPIKeys(ctx context.Context) ([]gen.ApiKeyEntry, error) {
+	var out []gen.ApiKeyEntry
+	err := c.call(ctx, gen.ListPlayerApiKeysOperation,
+		func(ctx context.Context) (any, error) { return c.gen.ListPlayerApiKeys(ctx) },
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListPlayerApiKeysOK:
+				out = v.Keys
+				return nil
+			case *gen.ErrorEnvelope:
+				return fromEnvelope(v, rid)
+			}
+			return unexpectedRes(gen.ListPlayerApiKeysOperation, res)
+		},
+	)
+	return out, err
+}
+
+// RevokePlayerAPIKey marks the given key as revoked. Revoking the
+// current key is allowed; subsequent requests with it return 401.
+func (c *Client) RevokePlayerAPIKey(ctx context.Context, id string) error {
+	return c.call(ctx, gen.RevokePlayerApiKeyOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.RevokePlayerApiKey(ctx, gen.RevokePlayerApiKeyParams{ID: id})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.RevokePlayerApiKeyNoContent:
+				return nil
+			case *gen.RevokePlayerApiKeyNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RevokePlayerApiKeyUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.RevokePlayerApiKeyOperation, res)
+		},
+	)
+}
+
+// DeleteAccount irreversibly deletes the caller's account. All ApiKeys
+// are revoked server-side as part of the same operation, so the caller
+// should also wipe its local credentials on success.
+func (c *Client) DeleteAccount(ctx context.Context) error {
+	return c.call(ctx, gen.DeleteAccountOperation,
+		func(ctx context.Context) (any, error) { return c.gen.DeleteAccount(ctx) },
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.DeleteAccountNoContent:
+				return nil
+			case *gen.ErrorEnvelope:
+				return fromEnvelope(v, rid)
+			}
+			return unexpectedRes(gen.DeleteAccountOperation, res)
+		},
+	)
+}

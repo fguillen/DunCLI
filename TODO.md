@@ -84,20 +84,22 @@ No new endpoints — just the plumbing every later phase consumes.
 operationIds: `requestPlayerMagicLink`, `exchangePlayerMagicLink`,
 `listPlayerApiKeys`, `revokePlayerApiKey`, `deleteAccount`.
 
-- [ ] `internal/config/`: viper-backed loader; resolves
+- [x] `internal/config/`: viper-backed loader; resolves
       `~/.dun/config.toml`; default base URL
       `http://localhost:3000/v1`
-- [ ] `internal/auth/store.go`: TOML file at `~/.dun/credentials`
+- [x] `internal/auth/store.go`: TOML file at `~/.dun/credentials`
       (mode 0600), keyed by `(base_url, email)`. No OS keychain.
-- [ ] `dun login`: prompt for email →  `requestPlayerMagicLink` → prompt
+- [x] `dun login`: prompt for email →  `requestPlayerMagicLink` → prompt
       for token from email → `exchangePlayerMagicLink` → persist
       `api_key` + `expires_at` to `~/.dun/credentials`
-- [ ] `dun logout`: revoke current key via `revokePlayerApiKey`, remove
+- [x] `dun logout`: revoke current key via `revokePlayerApiKey`, remove
       the entry from `~/.dun/credentials`
-- [ ] `dun keys list` / `dun keys revoke <id>`: `listPlayerApiKeys` /
+- [x] `dun keys list` / `dun keys revoke <id>`: `listPlayerApiKeys` /
       `revokePlayerApiKey`
-- [ ] `dun account delete`: confirm twice → `deleteAccount`
-- [ ] Tests: stubbed backend covering happy path, expired token, wrong
+- [x] `dun account delete`: single y/N confirmation → `deleteAccount`
+      *(deviation from original "confirm twice" — user direction at plan
+      review)*
+- [x] Tests: stubbed backend covering happy path, expired token, wrong
       scope (401), and `~/.dun/credentials` round-trip (file perms,
       TOML schema, missing-file behavior)
 
@@ -126,8 +128,8 @@ See [PRODUCT.md](PRODUCT.md) anti-goals.
       registered handler; pretty-print the result to scrollback
 - [ ] Built-in shell commands: `help [verb]`, `quit` / `exit`,
       `clear`, `version`, `whoami`, `where` (current
-      server/world/kingdom context), `use <server-slug>` /
-      `use world <slug>` to scope subsequent commands
+      server/world/kingdom context), `join <server-slug>` /
+      `join world <slug>` to scope subsequent commands
 - [ ] Tab completion engine: pluggable per-verb. Static for keywords
       and enums (building kinds, unit kinds, intents); dynamic for
       entity references via the Phase 1 `Resolve*` helpers

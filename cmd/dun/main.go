@@ -47,8 +47,10 @@ func newRootCmd(out io.Writer) *cobra.Command {
 	)
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		// `dun version` is intentionally side-effect-free; no logger needed.
-		if cmd.Name() == "version" {
+		// `dun version` and `dun completion` are intentionally
+		// side-effect-free; no logger needed.
+		switch cmd.Name() {
+		case "version", "completion":
 			return nil
 		}
 		l, c, err := dunlog.Init(logLevel)
@@ -69,6 +71,10 @@ func newRootCmd(out io.Writer) *cobra.Command {
 
 	root.AddCommand(newVersionCmd(out))
 	root.AddCommand(newTUICmd())
+	root.AddCommand(newLoginCmd())
+	root.AddCommand(newLogoutCmd())
+	root.AddCommand(newKeysCmd())
+	root.AddCommand(newAccountCmd())
 	return root
 }
 
