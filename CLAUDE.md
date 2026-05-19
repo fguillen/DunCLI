@@ -8,8 +8,10 @@ Guide for Claude Code sessions in this repo. Read this before making changes.
 multiplayer medieval-fantasy strategy backend. The backend is an API-only
 Rails 8 service; this CLI is its first consumer. Players use it during
 workday micro-idle moments — fast launch, snappy navigation, low cognitive
-load. See [PRODUCT.md](PRODUCT.md) for positioning and
-[TODO.md](TODO.md) for the implementation roadmap.
+load. See [PRODUCT.md](PRODUCT.md) for positioning,
+[TODO.md](TODO.md) for the implementation roadmap, and
+[docs/tutorial.md](docs/tutorial.md) for the end-user walkthrough of
+every shipped command.
 
 **v1 scope is player surface only.** Admin endpoints (`/v1/admin/...`) are
 explicitly out of scope.
@@ -213,6 +215,12 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
 - **Commits**: conventional commits (`feat:`, `fix:`, `chore:`, `docs:`,
   `build:`, `refactor:`, `test:`), one logical change per commit.
 - **Dependencies**: ask before adding a new top-level dependency.
+- **Tutorial**: [docs/tutorial.md](docs/tutorial.md) is the user-facing
+  walkthrough. **Whenever a phase ships a new user-visible verb,
+  flag, prompt, or storage file, update the tutorial in the same
+  commit.** It documents only what's actually implemented — never
+  unshipped phases. Verify quoted output and error strings against
+  the source before changing them.
 
 ## What NOT to do
 
