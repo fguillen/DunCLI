@@ -31,12 +31,11 @@ func TestParseLevel(t *testing.T) {
 	}
 }
 
-// TestInit_WritesJSONUnderXDGStateHome verifies that Init creates the
-// dun-cli subdirectory under $XDG_STATE_HOME and that emitted records are
-// valid JSON.
-func TestInit_WritesJSONUnderXDGStateHome(t *testing.T) {
+// TestInit_WritesJSONUnderDunHome verifies that Init creates ~/.dun under
+// the user's home and that emitted records are valid JSON.
+func TestInit_WritesJSONUnderDunHome(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("HOME", dir)
 
 	logger, closer, err := Init("debug")
 	require.NoError(t, err)
@@ -44,7 +43,7 @@ func TestInit_WritesJSONUnderXDGStateHome(t *testing.T) {
 
 	logger.Info("hello", "k", "v")
 
-	path := filepath.Join(dir, "dun-cli", LogFileName)
+	path := filepath.Join(dir, ".dun", LogFileName)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.NotEmpty(t, data, "log file should not be empty after a write")

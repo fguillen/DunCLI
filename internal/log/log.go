@@ -1,6 +1,6 @@
 // Package log wires the application's slog logger. Logs are written as JSON
-// to a file under $XDG_STATE_HOME/dun-cli/ so the TUI's alt-screen output is
-// never polluted by log lines.
+// to ~/.dun/dun-cli.log so interactive output (REPL prompt, transient
+// selectors) is never polluted by log lines.
 package log
 
 import (
@@ -15,19 +15,19 @@ import (
 // LogFileName is the file written under the state dir.
 const LogFileName = "dun-cli.log"
 
-// Init opens (or creates) the log file under $XDG_STATE_HOME/dun-cli/ and
-// returns a JSON slog.Logger plus the underlying file so callers can Close()
-// it on shutdown.
+// Init opens (or creates) the log file at ~/.dun/dun-cli.log and returns a
+// JSON slog.Logger plus the underlying file so callers can Close() it on
+// shutdown.
 //
 // level accepts: "debug", "info", "warn", "error" (case-insensitive). An empty
 // or unrecognized value defaults to "info".
 func Init(level string) (*slog.Logger, io.Closer, error) {
-	dir, err := stateDir()
+	dir, err := dunDir()
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve state dir: %w", err)
+		return nil, nil, fmt.Errorf("resolve dun dir: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("create state dir %q: %w", dir, err)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create dun dir %q: %w", dir, err)
 	}
 
 	path := filepath.Join(dir, LogFileName)
@@ -53,16 +53,14 @@ func parseLevel(s string) slog.Level {
 	}
 }
 
-// stateDir resolves $XDG_STATE_HOME/dun-cli, falling back to
-// $HOME/.local/state/dun-cli when XDG_STATE_HOME is unset (per the XDG Base
-// Directory spec).
-func stateDir() (string, error) {
-	if x := os.Getenv("XDG_STATE_HOME"); x != "" {
-		return filepath.Join(x, "dun-cli"), nil
-	}
+// dunDir returns ~/.dun — the single canonical location for all persistent
+// client state (config, credentials, logs, history, last-used context). No
+// XDG env vars are consulted; the dotfolder convention matches ~/.aws/ and
+// ~/.ssh/ and avoids scattering files across XDG paths.
+func dunDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "state", "dun-cli"), nil
+	return filepath.Join(home, ".dun"), nil
 }
