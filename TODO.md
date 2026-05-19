@@ -50,30 +50,32 @@ are explicitly **out of scope** for v1 and will be revisited later:
 Hand-rolled `internal/api/` layer that wraps the ogen-generated client.
 No new endpoints — just the plumbing every later phase consumes.
 
-- [ ] `internal/api/client.go`: constructor taking base URL, token
+- [x] `internal/api/client.go`: constructor taking base URL, token
       provider, and `*http.Client`; thin wrapper over `gen.Client`
-- [ ] Auth: `Authorization: Bearer <api_key>` header via a custom
-      `http.RoundTripper` (token loaded lazily from
-      `~/.dun/credentials` in Phase 2)
-- [ ] Error envelope decoding: parse
+- [x] Auth: `Authorization: Bearer <api_key>` header — implemented via
+      ogen's `SecuritySource` (more idiomatic than a custom
+      `RoundTripper`; both achieve the lazy-load goal). The custom
+      `requestIDTransport` handles the orthogonal concern of capturing
+      `X-Request-Id` from every response.
+- [x] Error envelope decoding: parse
       `{ "error": { "code", "message", "retry_after?" } }` into a typed
-      `api.Error` with `Code()`, `Message()`, `RetryAfter()`
-- [ ] Request-ID propagation: capture `X-Request-Id` from every response,
+      `api.Error` with `Code`, `Message`, `RequestID`, `HTTPStatus`
+- [x] Request-ID propagation: capture `X-Request-Id` from every response,
       attach to `api.Error`, log via slog with `slog.String("request_id", ...)`
-- [ ] 429 handling: when the envelope includes `retry_after`, surface it
-      as `api.RateLimitError` carrying the duration; do NOT auto-retry
-      silently (let the UI decide)
-- [ ] Context cancellation: every wrapper method takes `context.Context`
+- [x] 429 handling: detected at the transport (the OpenAPI spec does
+      not declare 429s, so ogen would otherwise return
+      `UnexpectedStatusCode`); surfaced as `api.RateLimitError`. No
+      auto-retry.
+- [x] Context cancellation: every wrapper method takes `context.Context`
       and threads it into the generated client
-- [ ] Entity resolvers: `ResolveServer(slug)`, `ResolveWorld(slug)`,
-      `ResolveKingdom(handle)`, `ResolveRegion(name)`, `ResolveArmy(name)`,
+- [x] Entity resolvers: `ResolveServer(slug)`, `ResolveWorld(slug)`,
+      `ResolveKingdom(worldID)` (caller's own kingdom via
+      `showWorld.my_kingdom`), `ResolveRegion(name)`, `ResolveArmy(name)`,
       `ResolvePlayer(handle)` — each backed by the relevant `list*` /
-      `show*` endpoint with a per-session memoization cache that the
-      shell owns. Returns the ULID for downstream calls. See
-      CLAUDE.md "Entity identification". Mutations
-      (`joinServer`, `joinWorld`, `splitArmy`, `renameArmy`,
-      `mergeArmy`) must invalidate the relevant cache.
-- [ ] Tests: `httptest.Server` exercising the auth header, the error
+      `show*` endpoint with a per-session memoization cache. Returns
+      the ULID for downstream calls. `Invalidate{Servers,Worlds,Armies}`
+      hooks are exposed for the mutations later phases will wire in.
+- [x] Tests: `httptest.Server` exercising the auth header, the error
       decoder, request-id capture, the 429 path, and resolver
       cache invalidation
 
