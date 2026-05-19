@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/fguillen/dun-cli/internal/auth"
+	"github.com/fguillen/dun-cli/internal/tui/shell"
 )
 
 func newLoginCmd() *cobra.Command {
@@ -22,9 +26,58 @@ func newLoginCmd() *cobra.Command {
 			"to ~/.dun/credentials (mode 0600) and used by subsequent commands.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runLogin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
+			if err := runLogin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			// Post-login handoff into the shell. The picker hook
+			// only opens when the player has > 1 server membership;
+			// the SingleMemberSlug branch handles the common one-
+			// server case so the user lands already scoped.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			opts, err := postLoginShellOptions(ctx)
+			if err != nil {
+				// Membership probe failed but login succeeded —
+				// fall back to the bare shell rather than refusing
+				// to enter it.
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"(could not pre-fetch server memberships, continuing without picker)")
+				opts = shell.Options{Version: Version}
+			}
+			return enterShell(ctx, opts)
 		},
 	}
+}
+
+// postLoginShellOptions inspects the player's server memberships and
+// returns shell.Options pre-set with either a single-member scope or
+// the PostLoginPicker flag.
+func postLoginShellOptions(ctx context.Context) (shell.Options, error) {
+	sess, err := loadSession()
+	if err != nil {
+		return shell.Options{}, err
+	}
+	list, err := sess.client.ListPlayerServers(ctx)
+	if err != nil {
+		return shell.Options{}, err
+	}
+	opts := shell.Options{Version: Version}
+	var members []string
+	for _, s := range list {
+		if s.Member {
+			members = append(members, s.Slug)
+		}
+	}
+	switch len(members) {
+	case 0:
+		// No memberships yet; user will run `servers` then
+		// `server join <slug>`. No flags set.
+	case 1:
+		opts.SingleMemberSlug = members[0]
+	default:
+		opts.PostLoginPicker = true
+	}
+	return opts, nil
 }
 
 func runLogin(ctx context.Context, in io.Reader, out io.Writer) error {

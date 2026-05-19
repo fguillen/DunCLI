@@ -4,6 +4,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,7 +16,11 @@ import (
 	"github.com/spf13/cobra"
 
 	dunlog "github.com/fguillen/dun-cli/internal/log"
-	"github.com/fguillen/dun-cli/internal/tui"
+	"github.com/fguillen/dun-cli/internal/tui/shell"
+
+	// Phase 4 verbs register themselves into shell's verb registry
+	// via init() — the blank import is what wires them in.
+	_ "github.com/fguillen/dun-cli/internal/tui/verbs"
 )
 
 // Version is the CLI version string. Overridden via -ldflags at release time.
@@ -31,10 +37,19 @@ func newRootCmd(out io.Writer) *cobra.Command {
 	var logLevel string
 
 	root := &cobra.Command{
-		Use:           "dun",
-		Short:         "Terminal client for the dun async multiplayer strategy game",
+		Use:   "dun",
+		Short: "Terminal client for the dun async multiplayer strategy game",
+		Long: "Bare `dun` drops you into the interactive shell after auth.\n" +
+			"Operational commands (login, logout, keys, account, version) are\n" +
+			"the only top-level subcommands.",
+		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return enterShell(ctx, shell.Options{Version: Version})
+		},
 	}
 	root.SetOut(out)
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info",
@@ -70,7 +85,6 @@ func newRootCmd(out io.Writer) *cobra.Command {
 	}
 
 	root.AddCommand(newVersionCmd(out))
-	root.AddCommand(newTUICmd())
 	root.AddCommand(newLoginCmd())
 	root.AddCommand(newLogoutCmd())
 	root.AddCommand(newKeysCmd())
@@ -90,15 +104,19 @@ func newVersionCmd(out io.Writer) *cobra.Command {
 	}
 }
 
-func newTUICmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tui",
-		Short: "Launch the Bubble Tea TUI",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
-			return tui.Run(ctx)
-		},
+// enterShell loads the session and hands off to shell.Run. It is the
+// shared entrypoint for the bare `dun` invocation and for the post-
+// login handoff (cmd/dun/login.go), so the shell setup stays in one
+// place. Missing credentials prints a clear "run `dun login`" hint
+// and exits non-zero.
+func enterShell(ctx context.Context, opts shell.Options) error {
+	sess, err := loadSession()
+	if err != nil {
+		return err
 	}
+	cred, ok := sess.store.CurrentCredential()
+	if !ok {
+		return errors.New("not logged in — run `dun login`")
+	}
+	return shell.Run(ctx, sess.cfg.BaseURL, cred.Email, sess.client, opts)
 }

@@ -115,63 +115,60 @@ up transient Bubble Tea selectors (alt-screen ok there).
 periodic polling. The shell renders only in response to user input.
 See [PRODUCT.md](PRODUCT.md) anti-goals.
 
-- [ ] Delete the Phase 0 splash (`internal/tui/splash.go`,
-      `splash_test.go`); the `dun tui` subcommand becomes a thin
-      wrapper that enters the shell (or is renamed to `dun shell` and
-      the bare `dun` invocation also enters the shell — decide during
-      implementation)
-- [ ] Prompt component: line editor with persistent history
-      (`~/.dun/history`), `dun>` prefix, multi-line input where
-      useful, Ctrl-C to abort current line, Ctrl-D to exit
-- [ ] Command dispatcher: parse the typed line into
-      (verb, subverb, positional args, flags); route to the
-      registered handler; pretty-print the result to scrollback
-- [ ] Built-in shell commands: `help [verb]`, `quit` / `exit`,
-      `clear`, `version`, `whoami`, `where` (current
-      server/world/kingdom context), `join <server-slug>` /
-      `join world <slug>` to scope subsequent commands
-- [ ] Tab completion engine: pluggable per-verb. Static for keywords
-      and enums (building kinds, unit kinds, intents); dynamic for
-      entity references via the Phase 1 `Resolve*` helpers
-- [ ] Interactive selector primitive: list-of-strings picker built on
-      `charmbracelet/bubbles/list`; reused by every later phase when
-      typed input would be tedious
-- [ ] Form primitive: multi-field input built on `charmbracelet/huh`
-      for things like march dispatch (target region + intent) and
-      caravan build (receiver + payload + escort). **Add dep first.**
-- [ ] Theme: Lipgloss palette in
+- [x] Delete the Phase 0 splash (`internal/tui/splash.go`,
+      `splash_test.go`); bare `dun` now enters the shell directly —
+      no `dun tui` / `dun shell` subcommand
+- [x] Prompt component: line editor with persistent history
+      (`~/.dun/history`), `dun>` prefix, Ctrl-C to abort current
+      line, Ctrl-D to exit *(via `chzyer/readline`)*
+- [x] Command dispatcher: parses (verb, subverb, positional args,
+      flags) via `shlex`; routes to the registered handler; pretty-
+      prints errors to scrollback
+- [x] Built-in shell commands: `help [verb]`, `quit` / `exit`,
+      `clear`, `version`, `whoami`, `where`, `join <server-slug>`
+      *(`join world <slug>` registered but stubbed pending Phase 5)*
+- [x] Tab completion engine: pluggable per-verb; static keywords +
+      dynamic entity references; flag-name + flag-value completion
+- [x] Interactive selector primitive: `bubbles/list` picker
+      (`internal/tui/selector/list.go`)
+- [x] Form primitive: `huh`-backed multi-field form
+      (`internal/tui/selector/form.go`)
+- [x] Theme: Lipgloss palette in
       [internal/tui/theme/](internal/tui/theme/); light + dark
-      variants applied to selectors, forms, and command output
-- [ ] Connectivity probe: `getHealth` once on shell start; surface a
-      clear "backend unreachable: <url>" state on failure with the
-      relevant `X-Request-Id` and exit code
-- [ ] Error rendering: every command failure prints
-      `error: <human message> (code=<code>, request_id=<id>)` to
-      scrollback; toast-style overlays only for selectors/forms
-- [ ] Session context: shell remembers (server, world, kingdom)
-      tuple; verbs default to the in-scope entity when not specified
-- [ ] Session context persistence: write the current
-      (server, world, kingdom) tuple to `~/.dun/state.json` after
-      every successful `use` command and after `joinServer` /
-      `joinWorld`. On shell start, re-load and re-apply so the user
-      drops back into the same context — the "long-term memory"
-      requirement
-- [ ] Tests: dispatcher table-driven; completion engine unit tests;
-      `teatest` snapshots for the prompt model and selector primitive
+      detected via termenv
+- [x] Connectivity probe: `getHealth` once on shell start; surfaces
+      `backend unreachable: <url> (code=…, request_id=…)` and a
+      non-zero exit code on failure
+- [x] Error rendering: every command failure prints
+      `error: <message> (code=<code>, request_id=<id>)` via
+      `shell.Err` and `internal/api.AsError`
+- [x] Session context: shell remembers (server, world, kingdom);
+      verbs read it via `sess.Context.*Slug()` / `KingdomHandle()`
+- [x] Session context persistence: writes `~/.dun/state.json` after
+      every successful dispatch; reloaded on shell start (foreign-
+      credential entries ignored)
+- [x] Tests: dispatcher table-driven; completion engine unit tests;
+      state-file round-trip + foreign-credential isolation
+      *(teatest snapshots for the prompt/selector primitive
+      deferred — not strictly required to ship Phase 3)*
 
 ## Phase 4 — Server membership
 
 operationIds: `listPlayerServers`, `joinServer`, `updateOwnProfile`,
 `showPlayerProfile`.
 
-- [ ] `servers` — `listPlayerServers`, member vs eligible split
-- [ ] `server join <slug>` — `joinServer` for invite-only servers
-- [ ] `profile set [--handle X] [--real-name "Y"]` — `updateOwnProfile`,
-      respects §17.1 validation rules and the `handle_locked` guard
-- [ ] `player show <handle>` — `showPlayerProfile` (on the in-scope
-      server)
-- [ ] Post-login default: drop into shell with the server picker open
-      if the player has > 1 server membership
+- [x] `servers` — `listPlayerServers`, member vs eligible split
+- [x] `server join <slug>` — `joinServer` for invite-only servers
+- [x] `profile set [--handle X] [--real-name "Y"]` —
+      `updateOwnProfile`, respects §17.1 validation rules and the
+      `handle_locked` guard. Bonus: `profile show` reads the caller's
+      own profile via `showPlayerProfile`.
+- [x] `player show <handle>` — `showPlayerProfile` (on the in-scope
+      server). No completer: `listServerPlayers` is missing from the
+      spec — flagged as a backend co-evolution candidate.
+- [x] Post-login default: `dun login` queries `listPlayerServers`
+      and either auto-applies the single membership or opens the
+      picker on shell entry when there are 2+
 
 ## Phase 5 — World browse & join
 

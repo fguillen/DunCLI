@@ -393,6 +393,80 @@ func (c *Client) RevokePlayerAPIKey(ctx context.Context, id string) error {
 	)
 }
 
+// JoinServer joins the caller to the given server. On success the
+// server cache is invalidated so the next ResolveServer / membership
+// lookup reflects the new membership.
+func (c *Client) JoinServer(ctx context.Context, serverID string) (*gen.JoinServerCreated, error) {
+	var out *gen.JoinServerCreated
+	err := c.call(ctx, gen.JoinServerOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.JoinServer(ctx, gen.JoinServerParams{ID: serverID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.JoinServerCreated:
+				out = v
+				return nil
+			case *gen.JoinServerForbidden:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.JoinServerNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.JoinServerUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.JoinServerOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateServers()
+	}
+	return out, err
+}
+
+// ProfileUpdate carries the optional fields PATCH /servers/{id}/me
+// accepts. Either field may be nil to leave it untouched; either may
+// point at an empty string to clear the server-side value.
+type ProfileUpdate struct {
+	Handle   *string
+	RealName *string
+}
+
+// UpdateOwnProfile updates the caller's profile on the given server.
+// Surfaces the backend's `handle_locked` (§17.1) verbatim — callers are
+// expected to render the error untouched.
+func (c *Client) UpdateOwnProfile(ctx context.Context, serverID string, in ProfileUpdate) (*gen.PlayerProfileWrite, error) {
+	req := gen.UpdateOwnProfileReq{}
+	if in.Handle != nil {
+		req.Handle = gen.NewOptString(*in.Handle)
+	}
+	if in.RealName != nil {
+		req.RealName = gen.NewOptString(*in.RealName)
+	}
+
+	var out *gen.PlayerProfileWrite
+	err := c.call(ctx, gen.UpdateOwnProfileOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.UpdateOwnProfile(ctx, gen.NewOptUpdateOwnProfileReq(req),
+				gen.UpdateOwnProfileParams{ID: serverID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.PlayerProfileWrite:
+				out = v
+				return nil
+			case *gen.UpdateOwnProfileNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.UpdateOwnProfileUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.UpdateOwnProfileUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.UpdateOwnProfileOperation, res)
+		},
+	)
+	return out, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.
