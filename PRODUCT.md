@@ -71,10 +71,10 @@ $
 The shell is the primary interface. Why a REPL instead of one-shot
 subcommands or a full-screen TUI:
 
-- **Latency budget.** Re-launching a binary, re-reading the keychain,
-  and re-fetching server/world/kingdom context for every action burns
-  most of the 30-second session window. A persistent process keeps it
-  free.
+- **Latency budget.** Re-launching a binary, re-reading credentials
+  from disk, and re-fetching server/world/kingdom context for every
+  action burns most of the 30-second session window. A persistent
+  process keeps it free.
 - **Conversational flow.** Most sessions are 3–10 actions in sequence
   (check stockpile → preview build → confirm → check armies → recall
   a march). A prompt makes that sequence feel natural; a CLI with one
@@ -109,20 +109,31 @@ Scrollback is sacred — users will copy lines out of it.
    block the splash on an API call.
 2. **Keyboard-first, mouse-irrelevant.** Every action has a keybinding.
    Mouse support is opt-in and never required.
-3. **Low cognitive load.** Show the next 1–3 actions, not all 12. Status
-   bar tells you where you are and what `?` opens.
-4. **Optimistic where safe, blocking where consequential.** Refresh a
-   list view in the background; confirm before launching an army.
+3. **Low cognitive load.** Show the next 1–3 actions, not all 12.
+   `where` tells you the current context; `help` shows the verbs
+   available in scope.
+4. **Confirm what's consequential.** Cheap reads are unprompted;
+   destructive or expensive verbs (cancel a build, launch an army,
+   start a Wonder) confirm before firing.
 5. **Errors are first-class.** Surface the backend's error envelope
-   `code` and `X-Request-Id` in a toast the user can copy. Don't swallow.
-6. **Persistent world ≠ persistent UI.** The TUI is stateless across
-   sessions; the truth lives in the backend. We can be killed and
+   `code` and `X-Request-Id` in the failure line the user can copy.
+   Don't swallow.
+6. **Persistent world ≠ persistent UI.** The shell holds only the
+   minimum context needed to feel continuous (last-used
+   server/world/kingdom in `~/.dun/state.json`, plus REPL history);
+   the truth lives in the backend. We can be killed and
    restarted at any moment without losing anything.
 
 ## Anti-goals
 
 - No browser. No GUI. No real-time multiplayer interactivity.
 - No background daemon. The CLI runs only while the user is in it.
+- No live in-shell updates. The shell never polls, pushes, or
+  re-renders after a command returns. Players see new state by
+  running the relevant verb again.
+- No interactive map UI. `map` prints a text rendering; there is no
+  arrow-key navigation, panning, or zoom. Region detail is a separate
+  verb.
 - No admin surface. Server creation, world configuration, and player
   management are out of scope; admins use the API directly (or a
   separate tool, eventually).

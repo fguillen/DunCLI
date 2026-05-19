@@ -35,7 +35,7 @@ are explicitly **out of scope** for v1 and will be revisited later:
       [internal/api/gen/](internal/api/gen/) (client features only)
 - [x] `Makefile`: `generate`, `build`, `test`, `lint`, `run`, `tidy`,
       `clean`, `help`
-- [x] `internal/log/`: slog JSON logger to `$XDG_STATE_HOME/dun-cli/`
+- [x] `internal/log/`: slog JSON logger to `~/.dun/dun-cli.log`
 - [x] `cmd/dun/`: cobra root + `version` + `tui` subcommands
       *(Note: `tui` is a Phase 0 placeholder splash. Phase 3 replaces
       it with the real REPL shell.)*
@@ -53,8 +53,8 @@ No new endpoints — just the plumbing every later phase consumes.
 - [ ] `internal/api/client.go`: constructor taking base URL, token
       provider, and `*http.Client`; thin wrapper over `gen.Client`
 - [ ] Auth: `Authorization: Bearer <api_key>` header via a custom
-      `http.RoundTripper` (token loaded lazily from the keychain in
-      Phase 2)
+      `http.RoundTripper` (token loaded lazily from
+      `~/.dun/credentials` in Phase 2)
 - [ ] Error envelope decoding: parse
       `{ "error": { "code", "message", "retry_after?" } }` into a typed
       `api.Error` with `Code()`, `Message()`, `RetryAfter()`
@@ -83,21 +83,21 @@ operationIds: `requestPlayerMagicLink`, `exchangePlayerMagicLink`,
 `listPlayerApiKeys`, `revokePlayerApiKey`, `deleteAccount`.
 
 - [ ] `internal/config/`: viper-backed loader; resolves
-      `$XDG_CONFIG_HOME/dun-cli/config.toml`; default base URL
+      `~/.dun/config.toml`; default base URL
       `http://localhost:3000/v1`
-- [ ] `internal/auth/store.go`: `go-keyring` storage with `0600`
-      config-file fallback when keychain unavailable; key per
-      `(base_url, email)`
+- [ ] `internal/auth/store.go`: TOML file at `~/.dun/credentials`
+      (mode 0600), keyed by `(base_url, email)`. No OS keychain.
 - [ ] `dun login`: prompt for email →  `requestPlayerMagicLink` → prompt
       for token from email → `exchangePlayerMagicLink` → persist
-      `api_key` + `expires_at` to keychain
-- [ ] `dun logout`: revoke current key via `revokePlayerApiKey`, wipe
-      keychain entry
+      `api_key` + `expires_at` to `~/.dun/credentials`
+- [ ] `dun logout`: revoke current key via `revokePlayerApiKey`, remove
+      the entry from `~/.dun/credentials`
 - [ ] `dun keys list` / `dun keys revoke <id>`: `listPlayerApiKeys` /
       `revokePlayerApiKey`
 - [ ] `dun account delete`: confirm twice → `deleteAccount`
 - [ ] Tests: stubbed backend covering happy path, expired token, wrong
-      scope (401), and keychain-unavailable fallback
+      scope (401), and `~/.dun/credentials` round-trip (file perms,
+      TOML schema, missing-file behavior)
 
 ## Phase 3 — Interactive shell (REPL)
 
@@ -107,14 +107,18 @@ in the spirit of psql / mongosh / redis-cli. The shell does **not**
 use alt-screen; scrollback is preserved. Individual commands may pop
 up transient Bubble Tea selectors (alt-screen ok there).
 
+**Non-goal for v1:** no background data refresh, no live toasts, no
+periodic polling. The shell renders only in response to user input.
+See [PRODUCT.md](PRODUCT.md) anti-goals.
+
 - [ ] Delete the Phase 0 splash (`internal/tui/splash.go`,
       `splash_test.go`); the `dun tui` subcommand becomes a thin
       wrapper that enters the shell (or is renamed to `dun shell` and
       the bare `dun` invocation also enters the shell — decide during
       implementation)
 - [ ] Prompt component: line editor with persistent history
-      (`$XDG_DATA_HOME/dun-cli/history`), `dun>` prefix, multi-line
-      input where useful, Ctrl-C to abort current line, Ctrl-D to exit
+      (`~/.dun/history`), `dun>` prefix, multi-line input where
+      useful, Ctrl-C to abort current line, Ctrl-D to exit
 - [ ] Command dispatcher: parse the typed line into
       (verb, subverb, positional args, flags); route to the
       registered handler; pretty-print the result to scrollback
@@ -142,6 +146,12 @@ up transient Bubble Tea selectors (alt-screen ok there).
       scrollback; toast-style overlays only for selectors/forms
 - [ ] Session context: shell remembers (server, world, kingdom)
       tuple; verbs default to the in-scope entity when not specified
+- [ ] Session context persistence: write the current
+      (server, world, kingdom) tuple to `~/.dun/state.json` after
+      every successful `use` command and after `joinServer` /
+      `joinWorld`. On shell start, re-load and re-apply so the user
+      drops back into the same context — the "long-term memory"
+      requirement
 - [ ] Tests: dispatcher table-driven; completion engine unit tests;
       `teatest` snapshots for the prompt model and selector primitive
 
@@ -174,12 +184,14 @@ operationIds: `listServerWorlds`, `showWorld`, `joinWorld`.
 operationIds: `showWorldMap`, `showRegion`, `showRegionAdjacent`,
 `listRuins`, `listNodes`, `showNode`.
 
-- [ ] `map` — `showWorldMap` rendered as an ASCII region graph for
-      the in-scope world (terrain glyphs per
-      `Plains/Forest/Hills/Mountain/Marsh`); transient alt-screen
-      view with arrow-key navigation
-- [ ] `region show <name>` — `showRegion`; `showRegionAdjacent`
-      drives "step into neighbor" navigation inside the map view
+- [ ] `map` — `showWorldMap` printed as a styled text region list
+      for the in-scope world: one line per region with terrain glyph
+      (`Plains/Forest/Hills/Mountain/Marsh`), owner handle, node
+      count, and adjacency. Output goes to scrollback; no alt-screen,
+      no navigation
+- [ ] `region show <name>` — `showRegion` plus an appended
+      `Adjacent: …` line from `showRegionAdjacent`. To "step into" a
+      neighbor, the user runs `region show <neighbor>`
 - [ ] `ruins` — `listRuins` for the in-scope world
 - [ ] `nodes [--owner mine|wild|captured|home-hoard]` — `listNodes`;
       `node show <id-or-region>` for detail via `showNode`

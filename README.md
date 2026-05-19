@@ -48,12 +48,20 @@ Phase 2; the REPL shell lands in Phase 3.
 
 ## Configuration
 
-- Config file: `$XDG_CONFIG_HOME/dun-cli/config.toml` (defaults to
-  `~/.config/dun-cli/config.toml` on macOS/Linux).
-- Logs (JSON): `$XDG_STATE_HOME/dun-cli/dun-cli.log` (defaults to
-  `~/.local/state/dun-cli/dun-cli.log`).
-- Credentials: OS keychain via `go-keyring`, with a `0600` config-file
-  fallback when no keychain is available.
+All persistent client state lives under a single dotfolder, `~/.dun/`:
+
+```
+~/.dun/
+├── config.toml      # defaults (base URL, log level, theme)
+├── credentials      # api keys, TOML, mode 0600
+├── history          # REPL line history
+├── state.json       # last-used server/world/kingdom context
+└── dun-cli.log      # JSON log output
+```
+
+No XDG env vars are consulted; no OS keychain is used. Wipe `~/.dun/`
+to fully reset the client. Copy the directory between machines to
+move your session.
 
 ## API contract
 
