@@ -212,13 +212,14 @@ Shows your current `(server, world, kingdom)` scope:
 ```
 dun> where
   server:  acme
-  world:   (none)
+  world:   spring-2026
   kingdom: IronFist
 ```
 
-> The `world:` and `kingdom:` lines exist in the shell already, but
-> only `server:` is set by anything in today's shipped verbs. The
-> kingdom handle is recorded when you set your profile.
+- `server` is set by `server join` (or the post-login picker).
+- `world` is set by `world join`.
+- `kingdom` is your per-server handle, recorded by `profile set` and
+  used as your kingdom's display name in every world on that server.
 
 ## 7. Servers
 
@@ -440,7 +441,274 @@ Account deleted.
 Only `y` or `yes` (case-insensitive) proceed; anything else prints
 `error: aborted` and exits non-zero.
 
-## 10. Storage layout
+## 10. Worlds
+
+Once you've joined a server, worlds are the next layer of scope. A
+world is one round of `dun` on that server — players join it, get a
+kingdom, build, fight, and (eventually) it ends.
+
+### `worlds` — list worlds on the in-scope server
+
+```
+dun> worlds
+Worlds:
+  spring-2026          grace     Spring 2026
+  autumn-2026          proposed  Autumn 2026
+```
+
+Columns: slug, status (`proposed`, `grace`, `active`, `archived`,
+`cancelled`), name.
+
+> The list does not split member vs eligible the way `servers` does —
+> the OpenAPI shape for `listServerWorlds` does not carry a
+> `my_kingdom` field. Flagged upstream as a backend co-evolution
+> candidate; for now use `world show <slug>` to see whether you're in.
+
+### `world show <slug>`
+
+```
+dun> world show spring-2026
+Spring 2026  (slug=spring-2026)
+  status:    grace
+  T0:        2026-05-01 00:00 UTC
+  grace end: 2026-05-03 00:00 UTC
+  regions:   42
+  kingdoms:  5 (min 8)
+  your kingdom: id=01J...  home_region=reg-2
+```
+
+The `your kingdom:` line only appears if you've already joined this
+world.
+
+### `world join <slug>` (alias: `join world <slug>`)
+
+```
+dun> world join spring-2026
+joined world (slug=spring-2026) as kingdom "IronFist"
+home region assigned: reg-2
+```
+
+If the world is still `proposed`, your kingdom is a stub (no home
+region yet) and you'll instead see:
+
+```
+no home region yet — assigned when the world starts
+```
+
+On success, the shell switches scope to that world. `where` will now
+show it. Tab completion on `world join <Tab>` lists every world on
+the in-scope server.
+
+The convenience alias `join world <slug>` does the same thing. (And
+`join <server-slug>` still works for servers — same `join` verb,
+two forms.)
+
+## 11. Map, regions, ruins, nodes
+
+These verbs all require a world to be in scope. If you haven't joined
+or set one, you'll see:
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+### `map` — every region on the in-scope world
+
+```
+dun> map
+Map:
+  T  Greyhollow        nodes=1  adj=Ironvale
+  ^  Ironvale          nodes=0  adj=Greyhollow
+```
+
+The first column is a terrain glyph: `.` plains, `T` forest, `^`
+hills, `M` mountain, `~` marsh. Output goes to scrollback — there's
+no alt-screen and no navigation. To "step into" a neighbour, run
+`region show <neighbour>`.
+
+### `region show <name>`
+
+```
+dun> region show Greyhollow
+Greyhollow  (T forest)
+  position:  x=0.10 y=0.20
+  owner:     kgd-7
+  nodes:
+    Greyhollow        gold    standard  owner=home-hoard
+  adjacent:  Ironvale
+```
+
+`adjacent:` comes from a separate `showRegionAdjacent` call so the
+neighbour names are always fresh.
+
+### `ruins` — list ruins on the in-scope world
+
+```
+dun> ruins
+Ruins:
+  Ironvale          tier=major     unclaimed  garrison=archer=4, levy=12
+```
+
+Columns: region name, tier, claim state, garrison composition.
+
+### `nodes [--owner mine|wild|captured|home-hoard]`
+
+```
+dun> nodes
+Nodes:
+  Greyhollow        gold    standard  owner=home-hoard
+  Ironvale          iron    rich      owner=wild  garrison=pikeman=8
+```
+
+`--owner` filters client-side:
+
+- `mine` — your kingdom owns it (and it's not a home-hoard).
+- `home-hoard` — your one immovable starter node.
+- `wild` — no owner.
+- `captured` — owned, but not by you.
+
+### `node show <id-or-region>`
+
+Pass either a region name (handy when you've seen it on the map) or
+the node's ULID directly.
+
+```
+dun> node show Greyhollow
+Node nd-1  (gold, standard)
+  region:    Greyhollow
+  owner:     (home-hoard)
+  base rate: 10/hr
+```
+
+If a region has more than one node, you'll be asked to pick one by
+ULID — the verb prints the candidate IDs in that case.
+
+Tab completion on `region show <Tab>` and `node show <Tab>` lists
+region names from the world map.
+
+## 12. Kingdom & economy
+
+These verbs require a world in scope and that you have a kingdom in
+it (i.e. you've already done `world join`). All of them target *your*
+kingdom — there's no `kingdom show <handle>` for other players in v1.
+
+### `kingdom` / `kingdom show`
+
+```
+dun> kingdom
+Kingdom kgd-7
+Stockpile (cap 1000):
+  gold=100  wood=50  stone=25  iron=10
+Production (per hour):
+  gold=12  wood=6  stone=3  iron=1
+Builds in progress:
+  (none)
+Training in progress:
+  (none)
+```
+
+The stockpile is lazily accrued by the backend on every call against
+current production rates and the warehouse cap. ETAs in the in-
+progress sections are relative (e.g. `ETA 2h 14m`).
+
+### `buildings [--upgradable]`
+
+Lists one row per building kind in your kingdom.
+
+```
+dun> buildings
+Buildings:
+  barracks         L1   ready
+  gold_mint        L3   building (ETA 14m)
+  iron_mine        L0   tier-gated
+  town_hall        L2   ready
+  ...
+```
+
+Status column meanings: `ready` (can queue an upgrade now), `max`
+(at level 20), `tier-gated` (needs another building's level first),
+`unaffordable` (stockpile too low), `building (ETA ...)` (already
+upgrading).
+
+`--upgradable` trims the list to rows where `upgrade_possible` is
+true backend-side.
+
+### `build preview <kind>`
+
+```
+dun> build preview town_hall
+town_hall upgrade preview
+  level:     L2 → L3
+  cost:      gold=100 wood=80 stone=40 iron=5
+  duration:  30m
+  tier:      gates met
+  affords:   yes
+```
+
+If the upgrade isn't possible right now, the relevant line spells
+out why (`tier:      unmet — needs stone_mason L1 (have L0)`,
+`affords:   no (missing gold=50 wood=0 stone=0 iron=0)`).
+
+Valid kinds: `town_hall`, `gold_mint`, `lumber_camp`, `quarry`,
+`iron_mine`, `warehouse`, `barracks`, `stable`, `siege_workshop`,
+`walls`, `watchtower`, `stone_mason`.
+
+### `build <kind>`
+
+Queues a real upgrade. First it prints the same preview as above,
+then opens a yes/no confirmation:
+
+```
+dun> build town_hall
+town_hall upgrade preview
+  ...
+Queue upgrade: town_hall → L3?
+> Yes   No
+```
+
+On `Yes`, resources are deducted immediately and you'll see:
+
+```
+queued: town_hall → L3, completes 2026-05-19 21:30 UTC
+```
+
+Without a `<kind>` argument the verb opens an interactive picker
+over the upgradable buildings instead:
+
+```
+dun> build
+Pick a building to upgrade
+> town_hall                L2 → L3
+  gold_mint                L3 → L4
+```
+
+Common failure modes the verb catches client-side before sending the
+request: `already at max level`, `tier gates unmet`, `can't afford
+this upgrade right now`. Anything else surfaces as the usual
+`error: ... (code=..., request_id=...)`.
+
+### `build cancel <id-or-kind>`
+
+You can cancel by either the build order's ULID or by the building
+kind. If you pass a kind and there's exactly one active order for it,
+the verb resolves it for you. If there are several, you'll be asked
+to pick by ID.
+
+```
+dun> build cancel town_hall
+Cancel this build order?
+This refunds 75% of resources spent. Elapsed time is lost.
+> Yes   No
+cancelled build ord-9 (town_hall)
+```
+
+The build slot is freed immediately and 75% of the resources are
+refunded; elapsed time is lost.
+
+Tab completion on `build cancel <Tab>` lists the kinds with active
+orders plus the order IDs themselves.
+
+## 13. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -476,7 +744,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 11. Troubleshooting
+## 14. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

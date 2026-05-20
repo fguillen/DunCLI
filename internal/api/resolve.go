@@ -258,3 +258,10 @@ func (c *Client) InvalidateArmies(kingdomID string) {
 	defer c.cache.mu.Unlock()
 	delete(c.cache.armies, kingdomID)
 }
+
+// InvalidateKingdom is the hook mutating Phase 7+ verbs call after a
+// successful build/training/cancel. The kingdom ULID itself does not
+// change over a session — `ResolveKingdom` is keyed by worldID — so
+// this is a no-op today, but the hook is wired so callers don't need
+// to remember to add it when later phases extend the kingdom cache.
+func (c *Client) InvalidateKingdom(_ string) {}

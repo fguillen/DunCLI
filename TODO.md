@@ -174,44 +174,54 @@ operationIds: `listPlayerServers`, `joinServer`, `updateOwnProfile`,
 
 operationIds: `listServerWorlds`, `showWorld`, `joinWorld`.
 
-- [ ] `worlds` — `listServerWorlds` for the in-scope server
-- [ ] `world show <slug>` — `showWorld` (T0/grace timestamps,
-      region/kingdom counts, caller's kingdom)
-- [ ] `world join <slug>` — `joinWorld` (proposed/grace states);
-      surface §16.7 admission errors and the §16.8 late-joiner bonus
+- [x] `worlds` — `listServerWorlds` for the in-scope server. Renders
+      a flat list (slug / status / name); cannot split member-vs-
+      eligible because `WorldSummary` does not carry `my_kingdom` —
+      flagged as a backend co-evolution candidate.
+- [x] `world show <slug>` — `showWorld` (T0/grace timestamps,
+      region/kingdom counts, caller's kingdom when joined)
+- [x] `world join <slug>` — `joinWorld` (proposed/grace states);
+      `join world <slug>` sugar in the `join` built-in now routes
+      here (was stubbed in Phase 3)
 
 ## Phase 6 — Map & regions
 
 operationIds: `showWorldMap`, `showRegion`, `showRegionAdjacent`,
 `listRuins`, `listNodes`, `showNode`.
 
-- [ ] `map` — `showWorldMap` printed as a styled text region list
+- [x] `map` — `showWorldMap` printed as a styled text region list
       for the in-scope world: one line per region with terrain glyph
-      (`Plains/Forest/Hills/Mountain/Marsh`), owner handle, node
-      count, and adjacency. Output goes to scrollback; no alt-screen,
-      no navigation
-- [ ] `region show <name>` — `showRegion` plus an appended
-      `Adjacent: …` line from `showRegionAdjacent`. To "step into" a
+      (`.` plains, `T` forest, `^` hills, `M` mountain, `~` marsh),
+      node count, and adjacency by name. Output goes to scrollback;
+      no alt-screen, no navigation
+- [x] `region show <name>` — `showRegion` plus an appended
+      `adjacent: …` line from `showRegionAdjacent`. To "step into" a
       neighbor, the user runs `region show <neighbor>`
-- [ ] `ruins` — `listRuins` for the in-scope world
-- [ ] `nodes [--owner mine|wild|captured|home-hoard]` — `listNodes`;
-      `node show <id-or-region>` for detail via `showNode`
+- [x] `ruins` — `listRuins` for the in-scope world
+- [x] `nodes [--owner mine|wild|captured|home-hoard]` — `listNodes`
+      with client-side filtering; `node show <id-or-region>` for
+      detail via `showNode` (region path uses `showRegion` and
+      disambiguates if multiple nodes are present)
 
 ## Phase 7 — Kingdom dashboard & economy
 
 operationIds: `showKingdom`, `listKingdomBuildings`, `previewBuildUpgrade`,
 `queueBuildOrder`, `cancelBuildOrder`.
 
-- [ ] `kingdom` / `kingdom show` — `showKingdom` (stockpile,
-      production rates, in-progress orders)
-- [ ] `buildings [--upgradable]` — `listKingdomBuildings`
-- [ ] `build preview <kind>` — `previewBuildUpgrade` (cost, duration,
-      tier gates, affordability)
-- [ ] `build <kind>` — interactive selector for kind if omitted,
-      confirms preview, calls `queueBuildOrder` with defensive
-      `target_level` check
-- [ ] `build cancel <id-or-kind>` — `cancelBuildOrder` (75% refund,
-      time lost); confirms before calling
+- [x] `kingdom` / `kingdom show` — `showKingdom` (stockpile,
+      production rates, in-progress build / training orders with ETAs)
+- [x] `buildings [--upgradable]` — `listKingdomBuildings` (status
+      column derives from `upgrade_possible` / `at_max_level` /
+      `tier_gates_met` / `affordable` / active `build_order`)
+- [x] `build preview <kind>` — `previewBuildUpgrade` (cost, duration,
+      tier gates, affordability with per-resource shortfall)
+- [x] `build <kind>` — selector picker over upgradable buildings if
+      kind is omitted, prints preview, `selector.Confirm` y/N before
+      `queueBuildOrder`; reads defensive `target_level` from the
+      preview response
+- [x] `build cancel <id-or-kind>` — `cancelBuildOrder` (75% refund,
+      time lost); resolves a `<kind>` to its order ID via
+      `showKingdom.in_progress_builds`; confirms before calling
 
 ## Phase 8 — Military
 

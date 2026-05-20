@@ -467,6 +467,315 @@ func (c *Client) UpdateOwnProfile(ctx context.Context, serverID string, in Profi
 	return out, err
 }
 
+// JoinWorld joins the caller to the given world. The returned Kingdom
+// is a stub during `proposed` (no home_region_id yet) and a fully
+// spawned kingdom during `grace`. On success the per-server world cache
+// is invalidated so the next ListServerWorlds/ResolveWorld reflects the
+// new membership.
+func (c *Client) JoinWorld(ctx context.Context, worldID, serverID string) (*gen.Kingdom, error) {
+	var out *gen.Kingdom
+	err := c.call(ctx, gen.JoinWorldOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.JoinWorld(ctx, gen.JoinWorldParams{ID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Kingdom:
+				out = v
+				return nil
+			case *gen.JoinWorldForbidden:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.JoinWorldNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.JoinWorldUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.JoinWorldUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.JoinWorldOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateWorlds(serverID)
+	}
+	return out, err
+}
+
+// ShowRegion fetches one region's full detail (nodes, ruin, adjacency).
+func (c *Client) ShowRegion(ctx context.Context, worldID, regionID string) (*gen.Region, error) {
+	var out *gen.Region
+	err := c.call(ctx, gen.ShowRegionOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowRegion(ctx, gen.ShowRegionParams{WorldID: worldID, ID: regionID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Region:
+				out = v
+				return nil
+			case *gen.ShowRegionNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowRegionUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowRegionOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ShowRegionAdjacent fetches the lean (id, name, terrain) descriptors
+// of every region adjacent to the given region.
+func (c *Client) ShowRegionAdjacent(ctx context.Context, worldID, regionID string) ([]gen.ShowRegionAdjacentOKRegionsItem, error) {
+	var out []gen.ShowRegionAdjacentOKRegionsItem
+	err := c.call(ctx, gen.ShowRegionAdjacentOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowRegionAdjacent(ctx, gen.ShowRegionAdjacentParams{WorldID: worldID, ID: regionID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ShowRegionAdjacentOK:
+				out = v.Regions
+				return nil
+			case *gen.ShowRegionAdjacentNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowRegionAdjacentUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowRegionAdjacentOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ListRuins returns every ruin in the given world (claimed and not).
+func (c *Client) ListRuins(ctx context.Context, worldID string) ([]gen.Ruin, error) {
+	var out []gen.Ruin
+	err := c.call(ctx, gen.ListRuinsOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListRuins(ctx, gen.ListRuinsParams{WorldID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListRuinsOK:
+				out = v.Ruins
+				return nil
+			case *gen.ListRuinsNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListRuinsUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListRuinsOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ListNodes returns every node in the world (wilderness, captured, and
+// home-hoard).
+func (c *Client) ListNodes(ctx context.Context, worldID string) ([]gen.Node, error) {
+	var out []gen.Node
+	err := c.call(ctx, gen.ListNodesOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListNodes(ctx, gen.ListNodesParams{WorldID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListNodesOK:
+				out = v.Nodes
+				return nil
+			case *gen.ListNodesNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListNodesUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListNodesOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ShowNode fetches one node's detail by ULID.
+func (c *Client) ShowNode(ctx context.Context, worldID, nodeID string) (*gen.Node, error) {
+	var out *gen.Node
+	err := c.call(ctx, gen.ShowNodeOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowNode(ctx, gen.ShowNodeParams{WorldID: worldID, ID: nodeID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ShowNodeOK:
+				out = &v.Node
+				return nil
+			case *gen.ShowNodeNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowNodeUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowNodeOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ShowKingdom returns the caller's kingdom dashboard: materialized
+// stockpiles, production rates, buildings, and in-progress orders. The
+// backend returns 404 to non-owners, so this is implicitly an "is this
+// my kingdom?" check too.
+func (c *Client) ShowKingdom(ctx context.Context, kingdomID string) (*gen.KingdomDetail, error) {
+	var out *gen.KingdomDetail
+	err := c.call(ctx, gen.ShowKingdomOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowKingdom(ctx, gen.ShowKingdomParams{ID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.KingdomDetail:
+				out = v
+				return nil
+			case *gen.ShowKingdomNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowKingdomUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowKingdomOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ListKingdomBuildings returns one entry per building kind with the
+// same upgrade-preview detail as PreviewBuildUpgrade plus the active
+// BuildOrder for that building (if any) and a derived
+// `upgrade_possible` flag. When upgradable is non-nil and true, the
+// backend trims the response to upgradable rows.
+func (c *Client) ListKingdomBuildings(ctx context.Context, kingdomID string, upgradable *bool) (*gen.KingdomBuildingsList, error) {
+	params := gen.ListKingdomBuildingsParams{KingdomID: kingdomID}
+	if upgradable != nil {
+		v := gen.ListKingdomBuildingsUpgradePossibleFalse
+		if *upgradable {
+			v = gen.ListKingdomBuildingsUpgradePossibleTrue
+		}
+		params.UpgradePossible = gen.NewOptListKingdomBuildingsUpgradePossible(v)
+	}
+	var out *gen.KingdomBuildingsList
+	err := c.call(ctx, gen.ListKingdomBuildingsOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListKingdomBuildings(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.KingdomBuildingsList:
+				out = v
+				return nil
+			case *gen.ListKingdomBuildingsNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListKingdomBuildingsUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListKingdomBuildingsOperation, res)
+		},
+	)
+	return out, err
+}
+
+// PreviewBuildUpgrade returns cost, duration, tier-gate status, and
+// affordability for the next level of the given building. The backend
+// reports cost regardless of world status or queue slot — the actual
+// QueueBuildOrder still enforces those at commit time.
+func (c *Client) PreviewBuildUpgrade(ctx context.Context, kingdomID, building string) (*gen.BuildingUpgradePreview, error) {
+	var out *gen.BuildingUpgradePreview
+	err := c.call(ctx, gen.PreviewBuildUpgradeOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.PreviewBuildUpgrade(ctx, gen.PreviewBuildUpgradeParams{
+				ID:       kingdomID,
+				Building: gen.PreviewBuildUpgradeBuilding(building),
+			})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.BuildingUpgradePreview:
+				out = v
+				return nil
+			case *gen.PreviewBuildUpgradeNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PreviewBuildUpgradeUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PreviewBuildUpgradeUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.PreviewBuildUpgradeOperation, res)
+		},
+	)
+	return out, err
+}
+
+// QueueBuildOrder enqueues an upgrade for the named building. The
+// backend enforces `target_level == current_level + 1` as a defensive
+// concurrency check; callers should derive it from PreviewBuildUpgrade
+// (or ListKingdomBuildings) rather than guessing. On success the
+// kingdom cache is invalidated.
+func (c *Client) QueueBuildOrder(ctx context.Context, kingdomID, building string, targetLevel int) (*gen.BuildOrder, error) {
+	req := &gen.QueueBuildOrderReq{
+		Building:    gen.QueueBuildOrderReqBuilding(building),
+		TargetLevel: targetLevel,
+	}
+	var out *gen.BuildOrder
+	err := c.call(ctx, gen.QueueBuildOrderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.QueueBuildOrder(ctx, req, gen.QueueBuildOrderParams{ID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.BuildOrder:
+				out = v
+				return nil
+			case *gen.QueueBuildOrderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.QueueBuildOrderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.QueueBuildOrderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.QueueBuildOrderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// CancelBuildOrder cancels an in-progress build order. The backend
+// refunds 75% of the spent resources (elapsed time is lost) and frees
+// the build slot.
+func (c *Client) CancelBuildOrder(ctx context.Context, kingdomID, orderID string) (*gen.BuildOrder, error) {
+	var out *gen.BuildOrder
+	err := c.call(ctx, gen.CancelBuildOrderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.CancelBuildOrder(ctx, gen.CancelBuildOrderParams{KingdomID: kingdomID, ID: orderID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.BuildOrder:
+				out = v
+				return nil
+			case *gen.CancelBuildOrderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.CancelBuildOrderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.CancelBuildOrderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.CancelBuildOrderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.

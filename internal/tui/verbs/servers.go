@@ -40,14 +40,22 @@ func init() {
 
 	shell.Register(&shell.Verb{
 		Name:    "join",
-		Summary: "Sugar for `server join <slug>` (and `join world <slug>` later)",
+		Summary: "Sugar for `server join <slug>` or `join world <world-slug>`",
 		Usage:   "join <server-slug> | join world <world-slug>",
 		Run:     runJoinSugar,
 		Complete: shell.SuggestFunc(func(ctx context.Context, sess *shell.Session, prefix string) ([]string, error) {
-			// `join world` is a future-Phase form; for now we only
-			// complete server slugs (the typed positional after
-			// `join`).
-			return suggestEligibleServerSlugs(ctx, sess, prefix)
+			// Two-form completer: at position 0 either suggest
+			// `world` plus eligible server slugs; after `world `,
+			// suggest world slugs on the in-scope server.
+			parts := strings.Fields(prefix)
+			if len(parts) >= 1 && parts[0] == "world" {
+				return suggestAnyWorldSlug(ctx, sess, prefix)
+			}
+			out, err := suggestEligibleServerSlugs(ctx, sess, prefix)
+			if err != nil {
+				return nil, err
+			}
+			return append(out, "world"), nil
 		}),
 	})
 
@@ -103,15 +111,14 @@ func runServerJoin(ctx context.Context, sess *shell.Session, args []string, _ ma
 	return nil
 }
 
-// runJoinSugar implements the `join` built-in. `join world <slug>` is
-// reserved for the Phase 5 world-scoping verb; until then we
-// explicitly reject it so the user gets a clear "not yet" message.
+// runJoinSugar implements the `join` built-in. `join <slug>` joins a
+// server; `join world <slug>` joins a world on the in-scope server.
 func runJoinSugar(ctx context.Context, sess *shell.Session, args []string, flags map[string]string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: join <server-slug>")
+		return fmt.Errorf("usage: join <server-slug> | join world <world-slug>")
 	}
 	if args[0] == "world" {
-		return fmt.Errorf("`join world` is not yet wired up (Phase 5)")
+		return runWorldJoin(ctx, sess, args[1:], flags)
 	}
 	return runServerJoin(ctx, sess, args, flags)
 }

@@ -23,6 +23,30 @@ type Field struct {
 // the original input slice appear; the map order is not stable.
 type Result map[string]string
 
+// Confirm opens a transient yes/no prompt. The returned bool is the
+// user's choice; ErrCancelled is returned if they aborted (Esc /
+// Ctrl-C). Useful for irreversible mutations where a full Form would
+// be overkill.
+func Confirm(ctx context.Context, title, description string) (bool, error) {
+	var ans bool
+	c := huh.NewConfirm().
+		Title(title).
+		Affirmative("Yes").
+		Negative("No").
+		Value(&ans)
+	if description != "" {
+		c = c.Description(description)
+	}
+	form := huh.NewForm(huh.NewGroup(c)).WithTheme(huh.ThemeBase16())
+	if err := form.RunWithContext(ctx); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled) {
+			return false, ErrCancelled
+		}
+		return false, fmt.Errorf("selector: confirm: %w", err)
+	}
+	return ans, nil
+}
+
 // Form opens a huh-backed multi-field form with the given fields and
 // returns their final values. ErrCancelled is returned on user
 // dismissal. The ctx is honored for cancellation.
