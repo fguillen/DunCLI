@@ -1,14 +1,16 @@
 # 05 — Game Verbs
 
-Phases 4-8 of [TODO.md](../../TODO.md). The files under
+Phases 4-9 of [TODO.md](../../TODO.md). The files under
 [internal/tui/verbs/](../../internal/tui/verbs/) — one per logical
 area (servers, profile, players, worlds, regions, kingdom). Phase 8
 moves into a sibling subpackage at
 [internal/tui/verbs/armies/](../../internal/tui/verbs/armies/) so the
 military surface (train, armies, march) can be split across multiple
-files without crowding the parent. Each file registers its verbs into
-the shell's package-level registry via `init()`, then implements
-handlers that follow a tight, repeating shape.
+files without crowding the parent. Phase 9 follows the same shape
+under [internal/tui/verbs/battles/](../../internal/tui/verbs/battles/).
+Each file registers its verbs into the shell's package-level registry
+via `init()`, then implements handlers that follow a tight, repeating
+shape.
 
 If you're adding a new verb, this is the file. If you're debugging
 why a specific verb behaves the way it does, the per-file tour at the
@@ -38,6 +40,7 @@ func init() {
 ```go
 _ "github.com/fguillen/dun-cli/internal/tui/verbs"
 _ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
+_ "github.com/fguillen/dun-cli/internal/tui/verbs/battles"
 ```
 
 By the time `shell.Run` reads the registry, every verb is registered.
@@ -375,6 +378,18 @@ pin them against `gen.QueueTrainingOrderReqBuilding.AllValues()` and
 `marchIntents` is pinned to `gen.MarchOrderIntent.AllValues()` by
 [armies/march_test.go](../../internal/tui/verbs/armies/march_test.go).
 
+### [battles/battles.go](../../internal/tui/verbs/battles/battles.go) — Phase 9
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `battles [--limit N] [--offset N]` | `ListKingdomBattles` | Newest-first table. `parseListFlags` rejects bad inputs client-side (positive int, ≤ 100 for `--limit`; non-negative int for `--offset`) before any HTTP call. The opponent column resolves to `(wilderness)` when `defender_kingdom_id` is empty, otherwise to the *other* side's kingdom ID — when the caller defended, that means the attacker. Region names come from `ShowWorldMap` via `regionNameMap` (mirror of armies); cross-world history falls back to ULIDs. The "more" hint at the bottom is only printed when `offset + len(list) < total_count` |
+| `battle show <id>` | `ShowBattle` | No name → ULID resolver — battle IDs are ULIDs the user copies from `battles`. Tab completion is wired via `suggestBattleIDs`, which fetches the first page and returns each ID. The renderer marks the caller's side with `(you)`; optional fields (`attacker_title`, `defender_title`, `march_order_id`, `army_id`) collapse to `—` when absent. The round log is verbose (one block per round) and only prints the `walls:` line when walls took damage. 404 surfaces unchanged from the wrapper — both unknown IDs and someone-else's battles look the same to the caller |
+
+`render.go` keeps the per-verb printers (`printBattleList`,
+`printBattleDetail`) and a few helpers (`lootString`,
+`compositionString`, `shortKingdom`, `formatOptFloat`) that other
+files in the subpackage don't need.
+
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
 Tiny shared printers — currently just `printProfileRead`,
@@ -418,6 +433,24 @@ The existing list of flagged candidates as of Phase 8:
   `name_taken`, `army_not_home`, `insufficient_units`, …) are not in
   the enum, so they arrive as `code: "invalid"` with the real code in
   `message` — the CLI can't switch on the specific cause.
+- Phase 9: `Battle.defender_kingdom_id` is `type: string` and listed
+  in `required:`, but a wilderness / ruin-claim battle has no
+  defending kingdom — the backend has been emitting empty string in
+  practice. Either marking the field `nullable: true` (and dropping
+  it from `required`) or replacing it with a typed `battle_type`
+  discriminator would let the CLI render wilderness vs PvP without
+  the "empty string means wilderness" workaround.
+- Phase 9: no `(world_id, kingdom_id) → owner_handle` resolver
+  exists. `battles` and `battle show` render the opponent kingdom as
+  a truncated ULID. Embedding `attacker_handle` / `defender_handle`
+  on `Battle` (mirroring how `World.my_kingdom` was added) would let
+  us print `vs IronFist`. Same gap applies to
+  `BattleParticipant.kingdom_id`.
+- Phase 9: `Battle.region_id` only resolves to a region name when
+  the battle's world matches the in-scope one (we cache
+  `ShowWorldMap` per world). For cross-world history — e.g. a
+  player browsing an archived world they're no longer in —
+  embedding `region_name` on `Battle` would close the gap.
 
 Don't ship workarounds quietly.
 

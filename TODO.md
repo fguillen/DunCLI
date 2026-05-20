@@ -270,11 +270,27 @@ public surface.
 
 operationIds: `listKingdomBattles`, `showBattle`.
 
-- [ ] `battles [--limit N] [--offset N]` — `listKingdomBattles`
-- [ ] `battle show <id>` — `showBattle` with round-by-round log +
-      participants
-- [ ] Wilderness battles (Phase 7 capture flows) shown distinctly in
-      the list when `defender_kingdom_id` is null
+- [x] `battles [--limit N] [--offset N]` — `listKingdomBattles`
+      (newest-first; `--limit` is client-side capped at the spec's
+      100; renders a "more: N remaining" hint when there are more
+      pages)
+- [x] `battle show <id>` — `showBattle` with verbose multi-line
+      round log + participants block; `(you)` marker on the caller's
+      side; tab completion lists IDs from the first page
+- [x] Wilderness battles shown distinctly in the list when
+      `defender_kingdom_id` is empty — opponent column collapses to
+      `(wilderness)`. Spec gap: the field is `type: string` and
+      listed in `required:`, but a wilderness battle has no defending
+      kingdom. Flagged as a backend co-evolution candidate
+      (`nullable: true` or a typed discriminator)
+
+**Phase 9 also landed:** region names in both verbs go through the
+in-scope world's `ShowWorldMap` cache (mirror of the Phase 8 armies
+pattern); cross-world history falls back to raw region ULIDs —
+flagged as a co-evolution candidate (`Battle.region_name`). Opponent
+kingdoms render as truncated ULIDs because there's no
+`(world_id, kingdom_id) → owner_handle` resolver — flagged for an
+`attacker_handle` / `defender_handle` enrichment on `Battle`.
 
 ## Phase 10 — Nodes & ruins capture flows
 

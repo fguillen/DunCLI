@@ -918,7 +918,134 @@ If the army has no active march:
 error: no active march for this army (code=not_found, request_id=req-…)
 ```
 
-## 14. Storage layout
+## 14. Combat & battle reports
+
+Phase 9 adds two read-only verbs over the battles your kingdom was
+part of — PvP raids, wilderness node captures, and ruin claims all
+land in the same history. They require a world in scope and a kingdom
+in it (i.e. you've already done `world join`):
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+A kingdom only ever sees its own battles. Trying `battle show <id>`
+for a battle you didn't participate in surfaces as a plain `not_found`
+— the same as if the ID didn't exist:
+
+```
+error: not found (code=not_found, request_id=req-…)
+```
+
+### `battles [--limit N] [--offset N]` — list battles
+
+Newest first, ordered by end time. Default page size is 25; the
+backend caps `--limit` at 100. Offset defaults to 0.
+
+```
+dun> battles
+Battles (showing 1-2 of 2):
+  bat-9        2026-05-19 21:30 UTC  Greyhollow      vs (wilderness)    attacker_victory    loot:gold=120 wood=40
+  bat-7        2026-05-18 14:02 UTC  Ironvale        vs kgd-2           defender_rout       loot:(none)
+```
+
+Columns: battle ID, end time (UTC), region, opponent, outcome, loot.
+
+- **Opponent** is `(wilderness)` for node-capture / ruin-claim
+  battles (where there's no defending kingdom) and the *other* side's
+  kingdom ID otherwise. The CLI shortens long ULIDs as `first4…last4`;
+  short test/dev IDs are kept verbatim.
+- **Region** is resolved via the in-scope world's map; battles from
+  another world (none today, but possible once worlds archive) fall
+  back to the raw region ULID.
+- **Loot** lists the resources transferred to the attacker after the
+  warehouse cap, in `gold wood stone iron` order. `(none)` when
+  empty.
+
+Paginate with `--limit` / `--offset`:
+
+```
+dun> battles --limit 5 --offset 10
+Battles (showing 11-15 of 137):
+  ...
+more: 122 remaining — `battles --limit 5 --offset 15`
+```
+
+The "more" hint is only printed when there's more history beyond the
+current window. Bad flag values fail before any HTTP call:
+
+```
+dun> battles --limit 999
+error: --limit must be ≤ 100 (got 999)
+```
+
+If you have no battles yet:
+
+```
+dun> battles
+Battles:
+  (none)
+```
+
+### `battle show <id>` — round-by-round detail
+
+Pass a battle ID lifted from `battles`. Tab completion (`battle show
+<Tab>`) lists the IDs from your most recent page.
+
+```
+dun> battle show bat-7
+Battle bat-7  (Ironvale)
+  when:       2026-05-18 14:00 UTC → 2026-05-18 14:30 UTC
+  outcome:    defender_rout
+  titles:     attacker=Champion  defender=—
+  march:      mrc-42
+  loot:       gold=5 iron=1
+Participants:
+  attacker  kgd-2                   army=arm-2
+    starting:   knight=4
+    ending:     (none)
+    casualties: knight=4
+  defender  kgd-1 (you)             army=arm-1
+    starting:   archer=10, levy=20
+    ending:     archer=7, levy=14
+    casualties: archer=3, levy=6
+Rounds:
+  Round 1
+    atk:        atk=120  def=80
+    def:        atk=60  def=100
+    damage:     attacker→defender=40  defender→attacker=10
+    casualties: attacker (levy=2)  defender (archer=4, levy=6)
+  
+  Round 2
+    atk:        atk=—  def=—
+    def:        atk=—  def=—
+    damage:     attacker→defender=38  defender→attacker=8
+    casualties: attacker (levy=2)  defender (archer=3, levy=5)
+    walls:      damage=15  walls_level_after=2
+```
+
+Notes on the rendering:
+
+- The participant whose `kingdom_id` matches yours gets a `(you)`
+  marker. Wilderness battles only have an attacker side (you), no
+  defender.
+- `titles:` and `march:` lines collapse to `—` when the backend
+  didn't fill them in.
+- The four `atk`/`def` round stats are optional in the spec; missing
+  values render as `—`.
+- The `walls:` line only appears on rounds where walls took damage
+  (typical when defending in your home region against catapults).
+- Outcomes are one of `attacker_victory`, `defender_victory`,
+  `attacker_rout`, `defender_rout` (per §16.3 of the game design).
+
+If the ID isn't yours or doesn't exist:
+
+```
+dun> battle show bat-xxxx
+error: not found (code=not_found, request_id=req-…)
+```
+
+## 15. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -954,7 +1081,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

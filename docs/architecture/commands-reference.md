@@ -113,6 +113,13 @@ via `init()` → `shell.Register`. Architecture chapter:
 | `march <army> <target-region> [intent]` | `dispatchMarch` after `ResolveArmy` + `ResolveRegion` | [armies/march.go](../../internal/tui/verbs/armies/march.go) | Intent picker over six values when omitted; path rendered with region names |
 | `recall <army>` | `recallMarch` | [armies/march.go](../../internal/tui/verbs/armies/march.go) | No-loss recall; wrapper synthesises a typed `not_found` from the spec's empty 404 |
 
+### Phase 9 — Combat & battle reports
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `battles [--limit N] [--offset N]` | `listKingdomBattles` | [battles/battles.go](../../internal/tui/verbs/battles/battles.go) | Newest-first table; opponent column is `(wilderness)` when `defender_kingdom_id` is empty, otherwise the *other* side's kingdom ID (handles caller-defended as well as caller-attacked). Region names come from the `ShowWorldMap` cache. Pagination via `--limit` (≤ 100) / `--offset`; total-count footer + "more" hint when more pages remain |
+| `battle show <id>` | `showBattle` | [battles/battles.go](../../internal/tui/verbs/battles/battles.go) | Header (region, when, outcome, titles, march, loot) + per-side participants (`(you)` marker on the caller) + verbose multi-line round log with optional `walls:` line. Tab completion lists IDs from the most recent battles page. 404 covers both unknown IDs and someone else's battles |
+
 ---
 
 ## Phases not yet shipped
@@ -122,8 +129,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 9 — Combat & battle reports**: `listKingdomBattles`,
-  `showBattle`
 - **Phase 10 — Nodes & ruins capture flows**: composes Phase 6 + Phase 8;
   no new endpoints
 - **Phase 11 — Trade**: `dispatchCaravan`, `listTradeLedger`

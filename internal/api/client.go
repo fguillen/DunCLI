@@ -1059,6 +1059,71 @@ func (c *Client) RecallMarch(ctx context.Context, armyID string) (*gen.MarchOrde
 	return out, err
 }
 
+// ListKingdomBattles returns the battle history for the given kingdom
+// (attacker or defender), newest first. `limit` <= 0 falls through to
+// the spec default (25); `offset` <= 0 means no offset. Returns the
+// page slice and the server's total_count so callers can render
+// pagination footers.
+func (c *Client) ListKingdomBattles(ctx context.Context, kingdomID string, limit, offset int) ([]gen.Battle, int, error) {
+	params := gen.ListKingdomBattlesParams{KingdomID: kingdomID}
+	if limit > 0 {
+		params.Limit = gen.OptInt{Value: limit, Set: true}
+	}
+	if offset > 0 {
+		params.Offset = gen.OptInt{Value: offset, Set: true}
+	}
+	var battles []gen.Battle
+	var total int
+	err := c.call(ctx, gen.ListKingdomBattlesOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListKingdomBattles(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListKingdomBattlesOK:
+				battles = v.Battles
+				total = v.TotalCount
+				return nil
+			case *gen.ListKingdomBattlesNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListKingdomBattlesUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListKingdomBattlesOperation, res)
+		},
+	)
+	return battles, total, err
+}
+
+// ShowBattle fetches one battle by ULID, plus its participant snapshots.
+// The backend returns 404 to anyone who isn't the attacker or defender
+// kingdom owner, so this implicitly serves as an "is this my battle?"
+// check.
+func (c *Client) ShowBattle(ctx context.Context, battleID string) (*gen.Battle, []gen.BattleParticipant, error) {
+	var battle *gen.Battle
+	var participants []gen.BattleParticipant
+	err := c.call(ctx, gen.ShowBattleOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowBattle(ctx, gen.ShowBattleParams{ID: battleID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ShowBattleOK:
+				b := v.Battle
+				battle = &b
+				participants = v.Participants
+				return nil
+			case *gen.ShowBattleNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowBattleUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowBattleOperation, res)
+		},
+	)
+	return battle, participants, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.

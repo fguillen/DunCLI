@@ -385,3 +385,91 @@ func TestSplitArmy_invalidatesArmiesCache(t *testing.T) {
 	require.Equal(t, "arm-2", newID)
 	require.Equal(t, int32(2), calls.Load(), "split must invalidate the armies cache")
 }
+
+func TestClient_ListKingdomBattles_propagatesParams(t *testing.T) {
+	var seenLimit, seenOffset string
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/kingdoms/kgd-1/battles" {
+			http.NotFound(w, r)
+			return
+		}
+		seenLimit = r.URL.Query().Get("limit")
+		seenOffset = r.URL.Query().Get("offset")
+		writeJSON(t, w, `{"battles": [{
+			"id": "bat-1", "world_id": "wld-1", "region_id": "reg-a",
+			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": "kgd-2",
+			"outcome": "attacker_victory",
+			"loot": {"gold": 10},
+			"log": [{"round": 1, "attacker_damage_dealt": 5, "defender_damage_dealt": 2,
+			         "attacker_casualties": {}, "defender_casualties": {"levy": 1}}],
+			"started_at": "2026-05-19T21:00:00Z",
+			"ended_at": "2026-05-19T21:30:00Z"
+		}], "total_count": 1}`)
+	})
+
+	battles, total, err := c.ListKingdomBattles(context.Background(), "kgd-1", 5, 10)
+	require.NoError(t, err)
+	require.Equal(t, "5", seenLimit)
+	require.Equal(t, "10", seenOffset)
+	require.Equal(t, 1, total)
+	require.Len(t, battles, 1)
+	require.Equal(t, "bat-1", battles[0].ID)
+	require.Equal(t, "kgd-2", battles[0].DefenderKingdomID)
+}
+
+func TestClient_ListKingdomBattles_omitsUnsetParams(t *testing.T) {
+	var rawQuery string
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		writeJSON(t, w, `{"battles": [], "total_count": 0}`)
+	})
+	_, _, err := c.ListKingdomBattles(context.Background(), "kgd-1", 0, 0)
+	require.NoError(t, err)
+	require.Empty(t, rawQuery, "no defaults should be sent when limit/offset are 0")
+}
+
+func TestClient_ShowBattle_decodesParticipants(t *testing.T) {
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/battles/bat-9" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, `{"battle": {
+			"id": "bat-9", "world_id": "wld-1", "region_id": "reg-a",
+			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": "",
+			"outcome": "attacker_victory",
+			"loot": {},
+			"log": [{"round": 1, "attacker_damage_dealt": 4, "defender_damage_dealt": 1,
+			         "attacker_casualties": {}, "defender_casualties": {"pikeman": 2}}],
+			"started_at": "2026-05-19T21:00:00Z",
+			"ended_at": "2026-05-19T21:30:00Z"
+		}, "participants": [
+			{"id": "p-1", "battle_id": "bat-9", "kingdom_id": "kgd-1",
+			 "side": "attacker",
+			 "starting_composition": {"levy": 10},
+			 "ending_composition": {"levy": 9},
+			 "casualties": {"levy": 1}}
+		]}`)
+	})
+
+	battle, parts, err := c.ShowBattle(context.Background(), "bat-9")
+	require.NoError(t, err)
+	require.NotNil(t, battle)
+	require.Equal(t, "bat-9", battle.ID)
+	require.Equal(t, "", battle.DefenderKingdomID, "wilderness battle has empty defender")
+	require.Len(t, parts, 1)
+	require.Equal(t, gen.BattleParticipantSideAttacker, parts[0].Side)
+}
+
+func TestClient_ShowBattle_404Envelope(t *testing.T) {
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-bat-404")
+		writeEnvelope(t, w, http.StatusNotFound, "not_found", "no such battle", 0)
+	})
+	_, _, err := c.ShowBattle(context.Background(), "bat-x")
+	require.Error(t, err)
+	apiErr := AsError(err)
+	require.NotNil(t, apiErr)
+	require.Equal(t, "not_found", apiErr.Code)
+	require.Equal(t, "req-bat-404", apiErr.RequestID)
+}
