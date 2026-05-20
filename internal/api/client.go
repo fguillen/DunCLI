@@ -776,6 +776,289 @@ func (c *Client) CancelBuildOrder(ctx context.Context, kingdomID, orderID string
 	return out, err
 }
 
+// PreviewTrainingOrder returns cost, duration, affordability, and the
+// max-affordable count for training `count` of `unit` at the given
+// `building` in the caller's kingdom. Like the build preview it does
+// not commit anything; the queue path still enforces the gates at
+// commit time.
+func (c *Client) PreviewTrainingOrder(ctx context.Context, kingdomID, building, unit string, count int) (*gen.TrainingPreview, error) {
+	var out *gen.TrainingPreview
+	err := c.call(ctx, gen.PreviewTrainingOrderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.PreviewTrainingOrder(ctx, gen.PreviewTrainingOrderParams{
+				ID:       kingdomID,
+				Building: gen.PreviewTrainingOrderBuilding(building),
+				Unit:     gen.Unit(unit),
+				Count:    count,
+			})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.TrainingPreview:
+				out = v
+				return nil
+			case *gen.PreviewTrainingOrderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PreviewTrainingOrderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PreviewTrainingOrderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.PreviewTrainingOrderOperation, res)
+		},
+	)
+	return out, err
+}
+
+// QueueTrainingOrder enqueues `count` of `unit` at `building`. The
+// backend enforces per-building FIFO. On success the kingdom cache is
+// invalidated so the next `kingdom` reflects the deducted stockpile.
+func (c *Client) QueueTrainingOrder(ctx context.Context, kingdomID, building, unit string, count int) (*gen.TrainingOrder, error) {
+	req := &gen.QueueTrainingOrderReq{
+		Building: gen.QueueTrainingOrderReqBuilding(building),
+		Unit:     gen.Unit(unit),
+		Count:    count,
+	}
+	var out *gen.TrainingOrder
+	err := c.call(ctx, gen.QueueTrainingOrderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.QueueTrainingOrder(ctx, req, gen.QueueTrainingOrderParams{ID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.TrainingOrder:
+				out = v
+				return nil
+			case *gen.QueueTrainingOrderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.QueueTrainingOrderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.QueueTrainingOrderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.QueueTrainingOrderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// CancelTrainingOrder cancels an in-progress training order. The
+// backend refunds 75% of the spent resources (elapsed time is lost).
+func (c *Client) CancelTrainingOrder(ctx context.Context, kingdomID, orderID string) (*gen.TrainingOrder, error) {
+	var out *gen.TrainingOrder
+	err := c.call(ctx, gen.CancelTrainingOrderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.CancelTrainingOrder(ctx, gen.CancelTrainingOrderParams{KingdomID: kingdomID, ID: orderID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.TrainingOrder:
+				out = v
+				return nil
+			case *gen.CancelTrainingOrderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.CancelTrainingOrderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.CancelTrainingOrderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.CancelTrainingOrderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// ShowArmy fetches one army by ULID. The backend returns 404 to
+// non-owners so this implicitly serves as an "is this my army?" check.
+func (c *Client) ShowArmy(ctx context.Context, armyID string) (*gen.Army, error) {
+	var out *gen.Army
+	err := c.call(ctx, gen.ShowArmyOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowArmy(ctx, gen.ShowArmyParams{ID: armyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Army:
+				out = v
+				return nil
+			case *gen.ShowArmyNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowArmyUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowArmyOperation, res)
+		},
+	)
+	return out, err
+}
+
+// SplitArmy peels `units` off the source army (`armyID`) into a fresh
+// army named `name`. The response carries the post-split source (or
+// null if it was emptied) plus the new army. On success the caller's
+// army cache is invalidated.
+func (c *Client) SplitArmy(ctx context.Context, armyID, name string, units map[string]int) (*gen.SplitArmyCreated, error) {
+	req := &gen.SplitArmyReq{
+		Name:  name,
+		Units: gen.SplitArmyReqUnits(units),
+	}
+	var out *gen.SplitArmyCreated
+	err := c.call(ctx, gen.SplitArmyOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.SplitArmy(ctx, req, gen.SplitArmyParams{ID: armyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.SplitArmyCreated:
+				out = v
+				return nil
+			case *gen.SplitArmyNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.SplitArmyUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.SplitArmyUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.SplitArmyOperation, res)
+		},
+	)
+	if err == nil && out != nil {
+		c.InvalidateArmies(out.New.KingdomID)
+	}
+	return out, err
+}
+
+// RenameArmy changes an army's display name. The backend enforces
+// per-kingdom uniqueness and a 60-char cap, returning 422 `name_taken`
+// for duplicates.
+func (c *Client) RenameArmy(ctx context.Context, armyID, name string) (*gen.Army, error) {
+	req := &gen.RenameArmyReq{Name: name}
+	var out *gen.Army
+	err := c.call(ctx, gen.RenameArmyOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.RenameArmy(ctx, req, gen.RenameArmyParams{ID: armyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Army:
+				out = v
+				return nil
+			case *gen.RenameArmyNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RenameArmyUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RenameArmyUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.RenameArmyOperation, res)
+		},
+	)
+	if err == nil && out != nil {
+		c.InvalidateArmies(out.KingdomID)
+	}
+	return out, err
+}
+
+// MergeArmy merges `sourceArmyID` into `targetArmyID`. Both armies
+// must be in the same kingdom + region and both `home`; the backend
+// returns 422 `incompatible_armies` otherwise.
+func (c *Client) MergeArmy(ctx context.Context, targetArmyID, sourceArmyID string) (*gen.Army, error) {
+	req := &gen.MergeArmyReq{FromID: sourceArmyID}
+	var out *gen.Army
+	err := c.call(ctx, gen.MergeArmyOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.MergeArmy(ctx, req, gen.MergeArmyParams{ID: targetArmyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Army:
+				out = v
+				return nil
+			case *gen.MergeArmyNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.MergeArmyUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.MergeArmyUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.MergeArmyOperation, res)
+		},
+	)
+	if err == nil && out != nil {
+		c.InvalidateArmies(out.KingdomID)
+	}
+	return out, err
+}
+
+// DispatchMarch sends `armyID` toward `targetRegionID` with the given
+// intent (one of attack/reinforce/scout/capture/claim_ruin/caravan).
+// The backend computes shortest path + ETA per §16.10.
+func (c *Client) DispatchMarch(ctx context.Context, armyID, targetRegionID, intent string) (*gen.MarchOrder, error) {
+	req := &gen.DispatchMarchReq{
+		TargetRegionID: targetRegionID,
+		Intent:         gen.DispatchMarchReqIntent(intent),
+	}
+	var out *gen.MarchOrder
+	err := c.call(ctx, gen.DispatchMarchOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.DispatchMarch(ctx, req, gen.DispatchMarchParams{ID: armyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.MarchOrder:
+				out = v
+				return nil
+			case *gen.DispatchMarchNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.DispatchMarchUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.DispatchMarchUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.DispatchMarchOperation, res)
+		},
+	)
+	return out, err
+}
+
+// RecallMarch turns the army's in-flight march into a return march
+// with intent `reinforce` (v1 simplification — elapsed-time return,
+// no per-leg position tracking, no unit losses). Returns a typed
+// "no active march" error when the backend responds 404.
+func (c *Client) RecallMarch(ctx context.Context, armyID string) (*gen.MarchOrder, error) {
+	var out *gen.MarchOrder
+	err := c.call(ctx, gen.RecallMarchOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.RecallMarch(ctx, gen.RecallMarchParams{ID: armyID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.MarchOrder:
+				out = v
+				return nil
+			case *gen.RecallMarchNotFound:
+				return &Error{
+					Code:       "not_found",
+					Message:    "no active march for this army",
+					RequestID:  rid,
+					HTTPStatus: 404,
+				}
+			case *gen.RecallMarchUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RecallMarchUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.RecallMarchOperation, res)
+		},
+	)
+	return out, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.

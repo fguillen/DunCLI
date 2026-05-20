@@ -214,6 +214,13 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
   models use `teatest` snapshot-style assertions.
 - **Commits**: conventional commits (`feat:`, `fix:`, `chore:`, `docs:`,
   `build:`, `refactor:`, `test:`), one logical change per commit.
+  **End every session with a clean commit.** Don't leave finished
+  work uncommitted in the worktree — once `make lint` / `make test`
+  / `make build` are green and the docs are updated, stage and
+  commit before handing back. If the session shipped two unrelated
+  pieces of work, split them into two commits. The wrap-up message
+  to the user should quote the resulting commit hash + subject so
+  they can `git show` it directly.
 - **Dependencies**: ask before adding a new top-level dependency.
 - **Tutorial**: [docs/tutorial.md](docs/tutorial.md) is the user-facing
   walkthrough. **Whenever a phase ships a new user-visible verb,

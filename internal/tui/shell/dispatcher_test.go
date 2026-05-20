@@ -35,6 +35,21 @@ func installTestVerbs() {
 			},
 		},
 	})
+	// A verb that is both a leaf (Run) and has sub-verbs — the build /
+	// train pattern. `mixed` alone runs the default handler; `mixed
+	// preview ...` routes to the sub-verb.
+	Register(&Verb{
+		Name:    "mixed",
+		Summary: "leaf-with-subs verb",
+		Run:     func(context.Context, *Session, []string, map[string]string) error { return nil },
+		Sub: map[string]*Verb{
+			"preview": {
+				Name:    "preview",
+				Summary: "preview sub",
+				Run:     func(context.Context, *Session, []string, map[string]string) error { return nil },
+			},
+		},
+	})
 }
 
 func TestParse_emptyLine(t *testing.T) {
@@ -71,6 +86,22 @@ func TestParse_unknownSubverb(t *testing.T) {
 	_, err := Parse("branch bogus")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown subcommand")
+}
+
+func TestParse_leafWithSub_routesToSubWhenMatched(t *testing.T) {
+	installTestVerbs()
+	cmd, err := Parse("mixed preview foo bar")
+	require.NoError(t, err)
+	require.Equal(t, []string{"mixed", "preview"}, cmd.Path)
+	require.Equal(t, []string{"foo", "bar"}, cmd.Args)
+}
+
+func TestParse_leafWithSub_fallsThroughToDefault(t *testing.T) {
+	installTestVerbs()
+	cmd, err := Parse("mixed somearg other")
+	require.NoError(t, err)
+	require.Equal(t, []string{"mixed"}, cmd.Path)
+	require.Equal(t, []string{"somearg", "other"}, cmd.Args)
 }
 
 func TestParse_flagWithValue(t *testing.T) {

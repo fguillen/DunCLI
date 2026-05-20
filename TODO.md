@@ -229,22 +229,42 @@ operationIds: `queueTrainingOrder`, `previewTrainingOrder`,
 `cancelTrainingOrder`, `listKingdomArmies`, `showArmy`, `splitArmy`,
 `renameArmy`, `mergeArmy`, `dispatchMarch`, `recallMarch`.
 
-- [ ] `train preview <building> <unit> <count>` —
+- [x] `train preview <building> <unit> <count>` —
       `previewTrainingOrder`
-- [ ] `train <building> <unit> <count>` — `queueTrainingOrder`
-      (per-building FIFO); selector for unit if omitted
-- [ ] `train cancel <id>` — `cancelTrainingOrder` (75% refund)
-- [ ] `armies` — `listKingdomArmies`
-- [ ] `army show <name>` — `showArmy` (composition, active march,
-      region)
-- [ ] `army split <name>` — `splitArmy` (home-only invariants); form
-      for new-army name + units
-- [ ] `army rename <name> <new-name>` — `renameArmy`
-- [ ] `army merge <name> --into <name>` — `mergeArmy`
-- [ ] `march <army> <target-region> <intent>` — `dispatchMarch`;
+- [x] `train <building> <unit> <count>` — `queueTrainingOrder`
+      (per-building FIFO); selector chain (building → unit → count)
+      kicks in when args are omitted
+- [x] `train cancel <id-or-unit>` — `cancelTrainingOrder` (75%
+      refund); resolves a unit kind to its order ID via
+      `showKingdom.in_progress_training`, mirroring `build cancel`
+- [x] `armies` — `listKingdomArmies` (region names resolved from
+      `showWorldMap`)
+- [x] `army show <name>` — `showArmy` (composition, status,
+      location). Active-march detail is **not** rendered because the
+      spec does not embed it on `Army` — flagged as backend
+      co-evolution candidate
+- [x] `army split <name>` — `splitArmy` (home-only invariants);
+      `huh` form with one numeric input per unit in source
+      composition + a name field
+- [x] `army rename <name> <new-name>` — `renameArmy`
+- [x] `army merge <name> --into <name>` — `mergeArmy`
+- [x] `march <army> <target-region> [intent]` — `dispatchMarch`;
       intent selector for `attack | reinforce | scout | capture |
-      claim_ruin | caravan` if omitted
-- [ ] `recall <army>` — `recallMarch` (no unit losses in v1)
+      claim_ruin | caravan` if omitted; path rendered with region
+      names
+- [x] `recall <army>` — `recallMarch` (no unit losses in v1); the
+      spec's empty 404 is wrapped as a typed "no active march"
+      `api.Error` so the user-facing error line is useful
+
+**Phase 8 also landed:** dispatcher fix so leaf-with-Sub verbs route
+correctly (e.g. `build preview town_hall` and `train preview …` now
+reach their sub-handlers via the REPL; previously the `Sub` map was
+only walked when the parent had no `Run`). Shared scope helpers moved
+out of `kingdom.go` / `regions.go` into a sibling
+[internal/tui/verbs/shared](internal/tui/verbs/shared/) package so the
+new [internal/tui/verbs/armies](internal/tui/verbs/armies/)
+subpackage can reuse them without exposing them on the parent's
+public surface.
 
 ## Phase 9 — Combat & battle reports
 

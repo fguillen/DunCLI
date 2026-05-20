@@ -12,6 +12,7 @@ import (
 
 	"github.com/fguillen/dun-cli/internal/api/gen"
 	"github.com/fguillen/dun-cli/internal/tui/shell"
+	"github.com/fguillen/dun-cli/internal/tui/verbs/shared"
 )
 
 // kingdomHandler stages the resolver chain (servers → worlds →
@@ -203,7 +204,7 @@ func TestRunBuildCancel_resolvesKindToOrderID(t *testing.T) {
 	// drive a tea program. Exercise the kind→id resolution path
 	// directly: requireKingdomID resolves the kingdom, then we verify
 	// the kind→order_id lookup the verb would do.
-	kingdomID, err := requireKingdomID(context.Background(), sess)
+	kingdomID, err := shared.RequireKingdomID(context.Background(), sess)
 	require.NoError(t, err)
 	kd, err := sess.API.ShowKingdom(context.Background(), kingdomID)
 	require.NoError(t, err)
@@ -221,7 +222,7 @@ func TestRunBuildCancel_resolvesKindToOrderID(t *testing.T) {
 func TestKingdomScope_requiresWorld(t *testing.T) {
 	s, _, _ := newTestSession(t, kingdomHandler(t, nil))
 	s.Context.SetServer("acme")
-	_, err := requireKingdomID(context.Background(), s)
+	_, err := shared.RequireKingdomID(context.Background(), s)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "world scope")
 }

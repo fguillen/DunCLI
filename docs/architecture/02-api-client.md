@@ -332,7 +332,9 @@ success**:
 | `JoinServer` | `InvalidateServers()` — caller is now a member, server cache is stale |
 | `JoinWorld` | `InvalidateWorlds(serverID)` |
 | `QueueBuildOrder`, `CancelBuildOrder` | `InvalidateKingdom(kingdomID)` (no-op today; reserved seam) |
-| Phase 8+ army mutations | `InvalidateArmies(kingdomID)` |
+| `QueueTrainingOrder`, `CancelTrainingOrder` | `InvalidateKingdom(kingdomID)` — training deducts stockpile so the next `kingdom` must refetch |
+| `SplitArmy`, `RenameArmy`, `MergeArmy` | `InvalidateArmies(kingdomID)` — composition / membership of the armies list changed |
+| `DispatchMarch`, `RecallMarch` | (no cache invalidation in v1) — `Army.status` is the only client-visible field that changes and the CLI always fetches fresh via `ListKingdomArmies` |
 
 The hooks are wired even when they are no-ops (`InvalidateKingdom`
 today) so callers don't need to remember to add them when a later

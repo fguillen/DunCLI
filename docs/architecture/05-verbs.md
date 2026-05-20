@@ -1,11 +1,14 @@
 # 05 — Game Verbs
 
-Phases 4-7 of [TODO.md](../../TODO.md). The files under
+Phases 4-8 of [TODO.md](../../TODO.md). The files under
 [internal/tui/verbs/](../../internal/tui/verbs/) — one per logical
-area (servers, profile, players, worlds, regions, kingdom). Each
-registers its verbs into the shell's package-level registry via
-`init()`, then implements handlers that follow a tight, repeating
-shape.
+area (servers, profile, players, worlds, regions, kingdom). Phase 8
+moves into a sibling subpackage at
+[internal/tui/verbs/armies/](../../internal/tui/verbs/armies/) so the
+military surface (train, armies, march) can be split across multiple
+files without crowding the parent. Each file registers its verbs into
+the shell's package-level registry via `init()`, then implements
+handlers that follow a tight, repeating shape.
 
 If you're adding a new verb, this is the file. If you're debugging
 why a specific verb behaves the way it does, the per-file tour at the
@@ -30,10 +33,11 @@ func init() {
 }
 ```
 
-`cmd/dun/main.go` brings the package in with a blank import:
+`cmd/dun/main.go` brings the package(s) in with blank imports:
 
 ```go
 _ "github.com/fguillen/dun-cli/internal/tui/verbs"
+_ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
 ```
 
 By the time `shell.Run` reads the registry, every verb is registered.
@@ -93,16 +97,18 @@ in-memory state is correct, the user just gets a heads-up.
 
 ---
 
-## Scope guards: `requireWorldID`, `requireKingdomID`
+## Scope guards: `shared.RequireWorldID`, `shared.RequireKingdomID`
 
-[verbs/regions.go:300](../../internal/tui/verbs/regions.go#L300) and
-[verbs/kingdom.go:307](../../internal/tui/verbs/kingdom.go#L307)
-define the two reusable scope guards every Phase 5+ verb leans on.
+[internal/tui/verbs/shared/scope.go](../../internal/tui/verbs/shared/scope.go)
+holds the two reusable scope guards every Phase 5+ verb leans on.
+They started life inside `package verbs` but moved into `shared` when
+Phase 8's `armies` subpackage needed them too — keeping them in a
+sibling package avoids exposing them on the parent's public surface.
 
 ```go
-// requireWorldID is the Phase 6/7 equivalent of the Phase 4 "not in a
+// RequireWorldID is the Phase 6+ equivalent of the Phase 4 "not in a
 // server scope" guard.
-func requireWorldID(ctx, sess) (string, error) {
+func RequireWorldID(ctx, sess) (string, error) {
     if sess.Context.ServerSlug() == "" {
         return "", errors.New("not in a server scope — try `server join <slug>` first")
     }
@@ -113,9 +119,9 @@ func requireWorldID(ctx, sess) (string, error) {
     return sess.API.ResolveWorld(ctx, serverID, worldSlug)
 }
 
-// requireKingdomID layers on top:
-func requireKingdomID(ctx, sess) (string, error) {
-    worldID, err := requireWorldID(ctx, sess); if err != nil { return "", err }
+// RequireKingdomID layers on top:
+func RequireKingdomID(ctx, sess) (string, error) {
+    worldID, err := RequireWorldID(ctx, sess); if err != nil { return "", err }
     id, err := sess.API.ResolveKingdom(ctx, worldID)
     if err != nil {
         if apiErr := api.AsError(err); apiErr != nil && apiErr.Code == "not_found" {
@@ -126,6 +132,9 @@ func requireKingdomID(ctx, sess) (string, error) {
     return id, nil
 }
 ```
+
+The package also exports `RelTime(time.Time) string` — the shared
+"X minutes from now" ETA formatter — used in every Phase 7+ printer.
 
 The pattern: check `Context` first (no HTTP if the scope isn't set),
 then call into the resolver, then translate a generic `not_found`
@@ -332,8 +341,39 @@ runs without an HTTP call. A regression test in
 against `gen.BuildingUpgradePreviewKind.AllValues()` so a spec drift
 fails loudly.
 
-`relTime` is the shared "X minutes from now" pretty-printer used by
-ETAs in both `kingdom` and `buildings`.
+### [armies/train.go](../../internal/tui/verbs/armies/train.go) — Phase 8
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `train preview <building> <unit> <count>` | `previewTrainingOrder` | Validates kind names against the local mirrors of `gen.QueueTrainingOrderReqBuilding` / `gen.Unit`; surfaces affordability + max_affordable_count |
+| `train <building> <unit> <count>` (or chain of pickers) | `previewTrainingOrder` + `selector.Confirm` + `queueTrainingOrder` | Walks `selector.Pick`(building) → `selector.Pick`(unit) → `selector.Form`(count) when args are omitted. Preview is **always** shown before the confirm. Surfaces `unit_trainable_here: false` as an advisory but lets the backend's 422 be authoritative |
+| `train cancel <id-or-unit>` | `cancelTrainingOrder` (resolves via `showKingdom.in_progress_training`) | Mirrors `build cancel`'s ambiguity handling: 1 match → resolve; ≥2 → ask for the ID |
+
+`trainingBuildings` and `unitKinds` are hard-coded mirrors of the spec
+enums; regression tests in
+[armies/train_test.go](../../internal/tui/verbs/armies/train_test.go)
+pin them against `gen.QueueTrainingOrderReqBuilding.AllValues()` and
+`gen.Unit.AllValues()`.
+
+### [armies/armies.go](../../internal/tui/verbs/armies/armies.go) — Phase 8
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `armies` | `listKingdomArmies` | Table with name, status, region name (resolved via `ShowWorldMap` cache), capacity, and the short composition summary from `compositionString` |
+| `army show <name>` | `ShowArmy` after `ResolveArmy` | Long form; the `status` field is the only signal that an army is on the move (no embedded march in v1 — flagged as backend co-evolution) |
+| `army split <name>` | `SplitArmy` after `ShowArmy` | Builds a `huh` form with one numeric input per unit in the source composition (`max <count>` validator) plus a name field. Checks `status == home` client-side to fail fast; the backend's 422 is still authoritative |
+| `army rename <name> <new-name>` | `RenameArmy` | Client-side regex `^.{1,60}$`; backend enforces uniqueness with 422 `name_taken` (wrapped as `code: invalid` in v1 — see co-evolution below) |
+| `army merge <name> --into <other-name>` | `MergeArmy` after two `ResolveArmy` | `selector.Confirm` before commit. Backend enforces same-kingdom, same-region, both `home` |
+
+### [armies/march.go](../../internal/tui/verbs/armies/march.go) — Phase 8
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `march <army> <target-region> [intent]` | `DispatchMarch` after `ResolveArmy` + `ResolveRegion` | Intent picker opens when `<intent>` is omitted, with one-line descriptions for each of the six intents. The dispatched march's `path` is resolved back to region names for display |
+| `recall <army>` | `RecallMarch` | The spec returns an empty 404 (not an error envelope) when there's no active march; the wrapper synthesizes an `api.Error{Code: "not_found", Message: "no active march for this army"}` so the user-facing error line is meaningful |
+
+`marchIntents` is pinned to `gen.MarchOrderIntent.AllValues()` by
+[armies/march_test.go](../../internal/tui/verbs/armies/march_test.go).
 
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
@@ -355,7 +395,7 @@ surfacing**:
 - Let the user decide whether to open a backend issue/PR or accept
   the CLI-side workaround.
 
-The existing list of flagged candidates as of Phase 7:
+The existing list of flagged candidates as of Phase 8:
 
 - `WorldSummary` lacks `my_kingdom` → `worlds` can't split
   member/eligible.
@@ -364,6 +404,20 @@ The existing list of flagged candidates as of Phase 7:
   filtering in `nodes`.
 - No `(worldID, otherHandle) → kingdomID` resolver → later phases
   pull IDs out of list payloads.
+- Phase 8: the auto-managed Garrison army has no `is_garrison: true`
+  field — the CLI can't special-case it without guessing by name.
+- Phase 8: `Army` lacks an embedded `current_march` pointer; `army
+  show` cannot render march detail without a separate
+  `march`/`armies` lookup.
+- Phase 8: no `march preview` endpoint — `march` can 422 with
+  `unreachable` only after commit. A `POST /armies/{id}/march/preview`
+  mirroring `previewBuildUpgrade` would close the loop.
+- Phase 8: `ErrorEnvelope.code` is constrained to a small enum
+  (`invalid`, `not_found`, `forbidden`, `handle_locked`, …). The
+  backend's documented Phase 8 codes (`incompatible_armies`,
+  `name_taken`, `army_not_home`, `insufficient_units`, …) are not in
+  the enum, so they arrive as `code: "invalid"` with the real code in
+  `message` — the CLI can't switch on the specific cause.
 
 Don't ship workarounds quietly.
 

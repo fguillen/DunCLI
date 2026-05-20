@@ -98,6 +98,21 @@ via `init()` → `shell.Register`. Architecture chapter:
 | `build <kind>` (or no arg → picker) | `previewBuildUpgrade`, `queueBuildOrder` | [kingdom.go](../../internal/tui/verbs/kingdom.go) | `selector.Pick` over upgradable, then `selector.Confirm`, then queue |
 | `build cancel <id-or-kind>` | `showKingdom`, `cancelBuildOrder` | [kingdom.go](../../internal/tui/verbs/kingdom.go) | Resolves `<kind>` to order ID via `in_progress_builds`; confirm before cancel |
 
+### Phase 8 — Military (training, armies, marches)
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `train preview <building> <unit> <count>` | `previewTrainingOrder` | [armies/train.go](../../internal/tui/verbs/armies/train.go) | Cost + duration + affordability + `max_affordable_count` |
+| `train <building> <unit> <count>` (or chain of pickers) | `previewTrainingOrder`, `queueTrainingOrder` | [armies/train.go](../../internal/tui/verbs/armies/train.go) | Chains `selector.Pick`(building) → `selector.Pick`(unit) → `selector.Form`(count) when args omitted; preview + `selector.Confirm` before queue |
+| `train cancel <id-or-unit>` | `showKingdom`, `cancelTrainingOrder` | [armies/train.go](../../internal/tui/verbs/armies/train.go) | Resolves a unit kind to its order ID via `in_progress_training`; 75% refund |
+| `armies` | `listKingdomArmies` | [armies/armies.go](../../internal/tui/verbs/armies/armies.go) | Table with status, region (resolved from `ShowWorldMap`), capacity, composition summary |
+| `army show <name>` | `showArmy` after `ResolveArmy` | [armies/armies.go](../../internal/tui/verbs/armies/armies.go) | Full composition + status + location |
+| `army split <name>` | `splitArmy` after `ShowArmy` | [armies/armies.go](../../internal/tui/verbs/armies/armies.go) | `huh` form with one numeric input per unit in source + name field; client-side `status == home` guard |
+| `army rename <name> <new-name>` | `renameArmy` | [armies/armies.go](../../internal/tui/verbs/armies/armies.go) | Client-side 1–60 char check; backend `name_taken` arrives wrapped as `code: invalid` |
+| `army merge <name> --into <other-name>` | `mergeArmy` after two `ResolveArmy` | [armies/armies.go](../../internal/tui/verbs/armies/armies.go) | `selector.Confirm` before commit; backend enforces same-region + both-home |
+| `march <army> <target-region> [intent]` | `dispatchMarch` after `ResolveArmy` + `ResolveRegion` | [armies/march.go](../../internal/tui/verbs/armies/march.go) | Intent picker over six values when omitted; path rendered with region names |
+| `recall <army>` | `recallMarch` | [armies/march.go](../../internal/tui/verbs/armies/march.go) | No-loss recall; wrapper synthesises a typed `not_found` from the spec's empty 404 |
+
 ---
 
 ## Phases not yet shipped
@@ -107,9 +122,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 8 — Military**: `queueTrainingOrder`, `previewTrainingOrder`,
-  `cancelTrainingOrder`, `listKingdomArmies`, `showArmy`, `splitArmy`,
-  `renameArmy`, `mergeArmy`, `dispatchMarch`, `recallMarch`
 - **Phase 9 — Combat & battle reports**: `listKingdomBattles`,
   `showBattle`
 - **Phase 10 — Nodes & ruins capture flows**: composes Phase 6 + Phase 8;

@@ -18,9 +18,12 @@ import (
 	dunlog "github.com/fguillen/dun-cli/internal/log"
 	"github.com/fguillen/dun-cli/internal/tui/shell"
 
-	// Phase 4 verbs register themselves into shell's verb registry
-	// via init() — the blank import is what wires them in.
+	// Verbs register themselves into shell's verb registry via init()
+	// — the blank imports below are what wire them in. Phases 4–7
+	// share the parent `verbs` package; Phase 8 (military) lives in
+	// the `armies` subpackage.
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs"
+	_ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
 )
 
 // Version is the CLI version string. Overridden via -ldflags at release time.

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fguillen/dun-cli/internal/api"
 	"github.com/fguillen/dun-cli/internal/api/gen"
 	"github.com/fguillen/dun-cli/internal/tui/selector"
 	"github.com/fguillen/dun-cli/internal/tui/shell"
+	"github.com/fguillen/dun-cli/internal/tui/verbs/shared"
 )
 
 // buildingKinds is the §17 building catalog, mirrored from the spec
@@ -83,7 +83,7 @@ func init() {
 // ── kingdom ──────────────────────────────────────────────────────────
 
 func runKingdomShow(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func runKingdomShow(ctx context.Context, sess *shell.Session, _ []string, _ map[
 // ── buildings ────────────────────────────────────────────────────────
 
 func runBuildingsList(ctx context.Context, sess *shell.Session, _ []string, flags map[string]string) error {
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func runBuildingsList(ctx context.Context, sess *shell.Session, _ []string, flag
 			state = "unaffordable"
 		}
 		if bo, ok := b.BuildOrder.Get(); ok {
-			state = "building (ETA " + relTime(bo.CompletesAt) + ")"
+			state = "building (ETA " + shared.RelTime(bo.CompletesAt) + ")"
 		}
 		lines = append(lines, fmt.Sprintf("%-15s  L%-2d  %s", string(b.Kind), b.CurrentLevel, state))
 	}
@@ -148,7 +148,7 @@ func runBuildingsList(ctx context.Context, sess *shell.Session, _ []string, flag
 // dispatcher routes here with no args we offer an interactive picker
 // over the upgradable buildings.
 func runBuildDefault(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func runBuildPreview(ctx context.Context, sess *shell.Session, args []string, _ 
 	if !isKnownBuildingKind(kind) {
 		return fmt.Errorf("unknown building kind %q (try one of: %s)", kind, strings.Join(buildingKinds, ", "))
 	}
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func runBuildCancel(ctx context.Context, sess *shell.Session, args []string, _ m
 		return errors.New("usage: build cancel <id-or-kind>")
 	}
 	arg := args[0]
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -302,23 +302,6 @@ func runBuildCancel(ctx context.Context, sess *shell.Session, args []string, _ m
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-// requireKingdomID is the Phase 7 equivalent of requireWorldID; it
-// additionally resolves the caller's kingdom in the in-scope world.
-func requireKingdomID(ctx context.Context, sess *shell.Session) (string, error) {
-	worldID, err := requireWorldID(ctx, sess)
-	if err != nil {
-		return "", err
-	}
-	id, err := sess.API.ResolveKingdom(ctx, worldID)
-	if err != nil {
-		if apiErr := api.AsError(err); apiErr != nil && apiErr.Code == "not_found" {
-			return "", errors.New("you have no kingdom in this world — try `world join <slug>` first")
-		}
-		return "", err
-	}
-	return id, nil
-}
-
 func isKnownBuildingKind(s string) bool {
 	for _, k := range buildingKinds {
 		if k == s {
@@ -326,22 +309,6 @@ func isKnownBuildingKind(s string) bool {
 		}
 	}
 	return false
-}
-
-func relTime(t time.Time) string {
-	d := time.Until(t)
-	if d < 0 {
-		return "ready"
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	return fmt.Sprintf("%dh %dm", h, m)
 }
 
 func pickUpgradableBuilding(ctx context.Context, sess *shell.Session, kingdomID string) (string, error) {
@@ -373,7 +340,7 @@ func pickUpgradableBuilding(ctx context.Context, sess *shell.Session, kingdomID 
 // `build cancel <Tab>` — returns the kinds with an active build order
 // plus the order IDs themselves so users can disambiguate either way.
 func suggestActiveBuildKinds(ctx context.Context, sess *shell.Session, _ string) ([]string, error) {
-	kingdomID, err := requireKingdomID(ctx, sess)
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
 	if err != nil {
 		return nil, nil
 	}
@@ -407,14 +374,14 @@ func printKingdom(sess *shell.Session, kd *gen.KingdomDetail) {
 	var ipb []string
 	for _, b := range kd.InProgressBuilds {
 		ipb = append(ipb, fmt.Sprintf("%s → L%d  (ETA %s)",
-			string(b.Kind), b.TargetLevel, relTime(b.CompletesAt)))
+			string(b.Kind), b.TargetLevel, shared.RelTime(b.CompletesAt)))
 	}
 	shell.Section(sess.Out, "Builds in progress:", strings.Join(ipb, "\n"))
 
 	var ipt []string
 	for _, t := range kd.InProgressTraining {
 		ipt = append(ipt, fmt.Sprintf("%s x%d at %s (ETA %s)",
-			string(t.Unit), t.Count, string(t.BuildingKind), relTime(t.CompletesAt)))
+			string(t.Unit), t.Count, string(t.BuildingKind), shared.RelTime(t.CompletesAt)))
 	}
 	shell.Section(sess.Out, "Training in progress:", strings.Join(ipt, "\n"))
 }
@@ -432,7 +399,7 @@ func printPreview(sess *shell.Session, p *gen.BuildingUpgradePreview) {
 			cost.Gold, cost.Wood, cost.Stone, cost.Iron)
 	}
 	if d, ok := p.DurationSeconds.Get(); ok {
-		_, _ = fmt.Fprintf(sess.Out, "  duration:  %s\n", relTime(time.Now().Add(time.Duration(d)*time.Second)))
+		_, _ = fmt.Fprintf(sess.Out, "  duration:  %s\n", shared.RelTime(time.Now().Add(time.Duration(d)*time.Second)))
 	}
 	if p.TierGatesMet {
 		_, _ = fmt.Fprintln(sess.Out, "  tier:      gates met")

@@ -43,11 +43,13 @@ The docs go from **outside-in**: each file zooms one level deeper.
    completion, per-session `Context`, the `~/.dun/state.json`
    persistence, and the built-in verbs (`help`, `whoami`, `where`,
    `clear`, `version`, `quit`, `join`).
-6. **Game verbs** ([05-verbs.md](05-verbs.md)) — Phases 4-7: how
-   `internal/tui/verbs/*.go` files register into the shell, the
-   require-scope helpers (`requireWorldID`, `requireKingdomID`), the
+6. **Game verbs** ([05-verbs.md](05-verbs.md)) — Phases 4-8: how
+   `internal/tui/verbs/*.go` files (and the `armies/` subpackage)
+   register into the shell, the shared scope guards
+   (`shared.RequireWorldID`, `shared.RequireKingdomID`), the
    resolve-name-then-call pattern, dynamic Suggesters, and a per-file
-   tour (servers, profile, player, worlds, regions, kingdom).
+   tour (servers, profile, player, worlds, regions, kingdom, train,
+   armies, march).
 7. **TUI primitives** ([06-tui-primitives.md](06-tui-primitives.md)) —
    the transient Bubble Tea programs verbs reach for: `selector.Pick`
    (list picker), `selector.Confirm` (y/N), `selector.Form` (huh
@@ -57,7 +59,7 @@ The docs go from **outside-in**: each file zooms one level deeper.
    every shipped verb and Cobra command, cross-linked to the
    `operationId` it calls.
 
-Phases 8–14 of [TODO.md](../../TODO.md) are not yet shipped; their
+Phases 9–14 of [TODO.md](../../TODO.md) are not yet shipped; their
 slots in this doc set will fill in as the work lands.
 
 ---
@@ -164,9 +166,9 @@ renders.
 
 ## What is _not_ here
 
-- **Phases 8–14** — military, combat, nodes/ruins, trade, wonders,
-  archive/hall-of-fame, packaging. None shipped yet; their docs will
-  land with the work.
+- **Phases 9–14** — combat reports, nodes/ruins capture, trade,
+  wonders, archive/hall-of-fame, packaging. None shipped yet; their
+  docs will land with the work.
 - **Admin surface** — explicitly out of scope for v1. The
   `bearerSource.AdminBearer` security source returns an error rather
   than sending an empty token.

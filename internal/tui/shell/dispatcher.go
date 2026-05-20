@@ -45,12 +45,21 @@ func Parse(line string) (*ParsedCommand, error) {
 		return nil, fmt.Errorf("%w: %q (type `help` for a list)", errUnknownVerb, tokens[0])
 	}
 
+	// Walk into Sub as long as the next token matches a registered
+	// sub-verb. A verb that has both `Run` and `Sub` (e.g. `build`,
+	// `train`) is a leaf for the default invocation but still routes
+	// to its sub when the next token names one — so `build preview x`
+	// resolves to the `preview` sub-verb, while `build x` falls
+	// through to the parent's Run with args=["x"].
 	path := []string{tokens[0]}
 	cur := root
 	i := 1
-	for !cur.IsLeaf() && i < len(tokens) {
+	for i < len(tokens) {
 		sub, ok := cur.Sub[tokens[i]]
 		if !ok {
+			if cur.IsLeaf() {
+				break
+			}
 			return nil, fmt.Errorf("unknown subcommand %q for %q", tokens[i], strings.Join(path, " "))
 		}
 		path = append(path, tokens[i])

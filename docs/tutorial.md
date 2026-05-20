@@ -708,7 +708,217 @@ refunded; elapsed time is lost.
 Tab completion on `build cancel <Tab>` lists the kinds with active
 orders plus the order IDs themselves.
 
-## 13. Storage layout
+## 13. Military
+
+Phase 8 verbs cover unit training, army management, and march
+dispatch. They all require a world in scope and a kingdom in it
+(i.e. you have already done `world join`). The same scope guard
+applies to every verb in this section:
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+### `armies` — list your kingdom's armies
+
+```
+dun> armies
+Armies:
+  Garrison          home        Greyhollow    cap=60    archer=3, levy=12
+  Vanguard          marching    Ironvale      cap=80    knight=4
+```
+
+Columns: name, status (`home`, `marching`, `engaged`, `returning`),
+region name (resolved from the world map cache), total capacity, and a
+short composition summary.
+
+### `army show <name>`
+
+```
+dun> army show Garrison
+Garrison  (home)
+  id:        arm-1
+  location:  Greyhollow
+  capacity:  60
+Composition:
+  archer       3
+  levy         12
+```
+
+The `status` field is the only signal that an army is on the move —
+the spec does not embed the active march, so use `where` together with
+`army show` to see what's going on.
+
+> Backend co-evolution candidate: an embedded `current_march` field on
+> `Army` would let `army show` render march detail without a second
+> call.
+
+### `army split <name>`
+
+Splits units off a home army into a new one. Opens a form with a name
+field and one input per unit currently in the source composition,
+pre-seeded to `0`:
+
+```
+dun> army split Garrison
+Split army Garrison
+> New army name (1-60 chars): Scouts
+  archer (max 3): 0
+  levy (max 12):  5
+```
+
+On submit, the new army is created and the source's composition is
+reduced. Anything left at `0` is skipped. If the source army would be
+emptied entirely, the backend removes it and the verb prints `source
+army was emptied and removed`.
+
+The source army must be `home`. Otherwise you'll see:
+
+```
+error: army "Vanguard" is not home (status=marching)
+```
+
+### `army rename <name> <new-name>`
+
+```
+dun> army rename Garrison "Royal Guard"
+renamed: Royal Guard (id=arm-1)
+```
+
+Names must be 1–60 characters. The backend rejects duplicates with the
+standard error envelope.
+
+### `army merge <name> --into <other-name>`
+
+Merges the first army into the second. Both must be `home` and in the
+same region. The verb confirms before sending:
+
+```
+dun> army merge Scouts --into Garrison
+Merge Scouts into Garrison?
+Both armies must be home and in the same region. The source army will be removed.
+> Yes   No
+merged into Garrison: archer=3, levy=17
+```
+
+If the invariants aren't met the backend returns a 422 wrapped in the
+standard `error: …` line.
+
+### `train preview <building> <unit> <count>`
+
+Previews the cost and duration of a training order without committing.
+
+```
+dun> train preview barracks levy 10
+levy training preview
+  at:        barracks (L2)
+  count:     10
+  per-unit:  gold=10 wood=5 stone=0 iron=0 in 1m
+  total:     gold=100 wood=50 stone=0 iron=0 in 15m
+  affords:   yes
+  max afford: 20
+```
+
+Valid buildings: `barracks`, `stable`, `siege_workshop`. Valid units:
+`levy`, `archer`, `pikeman`, `knight`, `catapult`, `royal_guard`,
+`scout`, `trebuchet`. Whether a unit is trainable at a given building
+is enforced server-side per §16.3.
+
+### `train <building> <unit> <count>` (or chain of pickers)
+
+Queues a real training order. Prints the same preview as above, then
+asks for confirmation:
+
+```
+dun> train barracks levy 10
+levy training preview
+  ...
+Queue training: levy × 10 at barracks?
+> Yes   No
+queued: levy × 10 at barracks, completes 2026-05-20 15:30 MST
+```
+
+Resources are deducted immediately. Drop in fewer positional args and
+the verb walks you through pickers / a count form:
+
+```
+dun> train
+Pick a training building
+> barracks
+  stable
+  siege_workshop
+```
+
+### `train cancel <id-or-unit>`
+
+Either the order's ULID or the unit kind. If a unit kind has exactly
+one in-progress order, the verb resolves it for you; if several, you
+must pick by ID:
+
+```
+dun> train cancel levy
+Cancel this training order?
+This refunds 75% of resources spent. Elapsed time is lost.
+> Yes   No
+cancelled training trn-9 (levy × 5)
+```
+
+Tab completion on `train cancel <Tab>` lists in-flight unit kinds plus
+their order IDs.
+
+### `march <army> <target-region> [intent]`
+
+Sends an army at a region with one of six intents. If `<intent>` is
+omitted, a picker opens:
+
+```
+dun> march Garrison Ironvale
+Pick a march intent
+> scout         fast recon — observe defenders without engaging
+  attack        engage a defender (combat resolves on arrival)
+  reinforce     join a friendly army at the target region
+  capture       seize a wilderness node (requires catapult)
+  claim_ruin    claim a ruin's reward (grants warehouse-capped cache)
+  caravan       deliver a trade payload to another player
+```
+
+On success:
+
+```
+march mrc-1  (scout)
+  army:      arm-1
+  arrives:   2026-05-20 02:00 UTC  (ETA 2h)
+  path:      Greyhollow → Ironvale
+```
+
+Tab completion on `march <Tab>` suggests your kingdom's armies; on
+`march Garrison <Tab>` it suggests region names.
+
+> Backend co-evolution candidate: a `march preview` endpoint mirroring
+> `build preview` would let the CLI pre-flight unreachable / illegal
+> intents instead of relying on a post-commit 422.
+
+### `recall <army>`
+
+Turns an in-flight march into a return march. v1 is non-destructive —
+no unit losses, elapsed-time return path.
+
+```
+dun> recall Vanguard
+recalled: army Vanguard returning, arrives 2026-05-20 03:00 UTC
+march mrc-2  (reinforce)
+  army:      arm-2
+  arrives:   2026-05-20 03:00 UTC  (ETA 2h)
+  path:      Ironvale → Greyhollow
+```
+
+If the army has no active march:
+
+```
+error: no active march for this army (code=not_found, request_id=req-…)
+```
+
+## 14. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -744,7 +954,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

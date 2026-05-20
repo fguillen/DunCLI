@@ -10,6 +10,7 @@ import (
 	"github.com/fguillen/dun-cli/internal/api"
 	"github.com/fguillen/dun-cli/internal/api/gen"
 	"github.com/fguillen/dun-cli/internal/tui/shell"
+	"github.com/fguillen/dun-cli/internal/tui/verbs/shared"
 )
 
 func init() {
@@ -99,7 +100,7 @@ func terrainGlyph(t string) string {
 // response, since RegionSummary.adjacency is a []string of region
 // IDs).
 func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,7 @@ func runRegionShow(ctx context.Context, sess *shell.Session, args []string, _ ma
 	if len(args) != 1 {
 		return errors.New("usage: region show <name>")
 	}
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -168,7 +169,7 @@ func runRegionShow(ctx context.Context, sess *shell.Session, args []string, _ ma
 
 // runRuinsList implements `ruins`.
 func runRuinsList(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -197,7 +198,7 @@ func runRuinsList(ctx context.Context, sess *shell.Session, _ []string, _ map[st
 // client-side because the spec does not declare a server-side filter
 // for ListNodes.
 func runNodesList(ctx context.Context, sess *shell.Session, _ []string, flags map[string]string) error {
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -255,7 +256,7 @@ func runNodeShow(ctx context.Context, sess *shell.Session, args []string, _ map[
 		return errors.New("usage: node show <id-or-region>")
 	}
 	arg := args[0]
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -292,25 +293,6 @@ func runNodeShow(ctx context.Context, sess *shell.Session, args []string, _ map[
 	}
 	printNode(sess, node)
 	return nil
-}
-
-// requireWorldID is the Phase 6/7 equivalent of the Phase 4
-// "not in a server scope" guard. Returns the resolved world ULID for
-// the in-scope server+world or a user-facing error.
-func requireWorldID(ctx context.Context, sess *shell.Session) (string, error) {
-	serverSlug := sess.Context.ServerSlug()
-	if serverSlug == "" {
-		return "", errors.New("not in a server scope — try `server join <slug>` first")
-	}
-	worldSlug := sess.Context.WorldSlug()
-	if worldSlug == "" {
-		return "", errors.New("not in a world scope — try `world join <slug>` first")
-	}
-	serverID, err := sess.API.ResolveServer(ctx, serverSlug)
-	if err != nil {
-		return "", err
-	}
-	return sess.API.ResolveWorld(ctx, serverID, worldSlug)
 }
 
 // matchOwner returns true when the node passes the --owner filter
@@ -448,7 +430,7 @@ func printNode(sess *shell.Session, n *gen.Node) {
 // suggestRegionName is the dynamic Suggester for region-name args
 // (`region show <Tab>`, `node show <Tab>`).
 func suggestRegionName(ctx context.Context, sess *shell.Session, _ string) ([]string, error) {
-	worldID, err := requireWorldID(ctx, sess)
+	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
 		return nil, nil
 	}

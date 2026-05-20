@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -248,4 +249,139 @@ func AsRateLimit(err error) *RateLimitError {
 		return rl
 	}
 	return nil
+}
+
+// ── Phase 8 wrappers ──────────────────────────────────────────────
+
+func TestPreviewTrainingOrder_capturesQueryParams(t *testing.T) {
+	var qp url.Values
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		qp = r.URL.Query()
+		w.Header().Set("X-Request-Id", "req-train-preview")
+		writeJSON(t, w, `{
+			"building_kind": "barracks",
+			"unit": "levy",
+			"count": 5,
+			"building_level": 2,
+			"building_built": true,
+			"unit_trainable_here": true,
+			"per_unit_cost": {"gold": 10, "wood": 5, "stone": 0, "iron": 0},
+			"total_cost": {"gold": 50, "wood": 25, "stone": 0, "iron": 0},
+			"per_unit_seconds": 90,
+			"total_seconds": 450,
+			"affordable": true,
+			"missing": {"gold": 0, "wood": 0, "stone": 0, "iron": 0},
+			"max_affordable_count": 20
+		}`)
+	})
+
+	prev, err := c.PreviewTrainingOrder(context.Background(), "kgd-1", "barracks", "levy", 5)
+	require.NoError(t, err)
+	require.Equal(t, "barracks", string(prev.BuildingKind))
+	require.Equal(t, 5, prev.Count)
+	require.Equal(t, "barracks", qp.Get("building"))
+	require.Equal(t, "levy", qp.Get("unit"))
+	require.Equal(t, "5", qp.Get("count"))
+}
+
+func TestDispatchMarch_postsIntentAndTarget(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("X-Request-Id", "req-march")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{
+			"id": "mrc-1",
+			"army_id": "arm-1",
+			"intent": "scout",
+			"origin_region_id": "reg-a",
+			"target_region_id": "reg-b",
+			"path": ["reg-a", "reg-b"],
+			"dispatched_at": "2026-05-20T00:00:00Z",
+			"arrives_at": "2026-05-20T02:00:00Z",
+			"arrived_at": null,
+			"recalled_at": null
+		}`))
+	})
+
+	march, err := c.DispatchMarch(context.Background(), "arm-1", "reg-b", "scout")
+	require.NoError(t, err)
+	require.Equal(t, "mrc-1", march.ID)
+	require.Equal(t, "scout", string(march.Intent))
+	require.Equal(t, "reg-b", body["target_region_id"])
+	require.Equal(t, "scout", body["intent"])
+}
+
+func TestRecallMarch_404SurfacesNotFound(t *testing.T) {
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-recall")
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	_, err := c.RecallMarch(context.Background(), "arm-99")
+	require.Error(t, err)
+	apiErr := AsError(err)
+	require.NotNil(t, apiErr)
+	require.Equal(t, "not_found", apiErr.Code)
+	require.Contains(t, apiErr.Message, "no active march")
+}
+
+func TestSplitArmy_invalidatesArmiesCache(t *testing.T) {
+	calls := atomic.Int32{}
+	splitDone := atomic.Bool{}
+	c, _ := newTestClient(t, StaticToken("t"), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-split")
+		switch r.URL.Path {
+		case "/v1/kingdoms/kgd-1/armies":
+			calls.Add(1)
+			if splitDone.Load() {
+				writeJSON(t, w, `{"armies": [
+					{"id": "arm-1", "kingdom_id": "kgd-1", "name": "Garrison", "status": "home",
+					 "location_region_id": "reg-a",
+					 "composition": {"levy": 7}, "total_capacity": 35},
+					{"id": "arm-2", "kingdom_id": "kgd-1", "name": "Scouts", "status": "home",
+					 "location_region_id": "reg-a",
+					 "composition": {"levy": 5}, "total_capacity": 25}
+				]}`)
+			} else {
+				writeJSON(t, w, `{"armies": [
+					{"id": "arm-1", "kingdom_id": "kgd-1", "name": "Garrison", "status": "home",
+					 "location_region_id": "reg-a",
+					 "composition": {"levy": 12}, "total_capacity": 60}
+				]}`)
+			}
+		case "/v1/armies/arm-1/split":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			splitDone.Store(true)
+			_, _ = w.Write([]byte(`{
+				"source": {"id": "arm-1", "kingdom_id": "kgd-1", "name": "Garrison", "status": "home",
+				           "location_region_id": "reg-a",
+				           "composition": {"levy": 7},
+				           "total_capacity": 35},
+				"new": {"id": "arm-2", "kingdom_id": "kgd-1", "name": "Scouts", "status": "home",
+				        "location_region_id": "reg-a",
+				        "composition": {"levy": 5},
+				        "total_capacity": 25}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	// Warm the resolver cache.
+	id, err := c.ResolveArmy(context.Background(), "kgd-1", "Garrison")
+	require.NoError(t, err)
+	require.Equal(t, "arm-1", id)
+	require.Equal(t, int32(1), calls.Load())
+
+	// Splitting should invalidate the cache so the next lookup re-fetches.
+	_, err = c.SplitArmy(context.Background(), "arm-1", "Scouts", map[string]int{"levy": 5})
+	require.NoError(t, err)
+
+	newID, err := c.ResolveArmy(context.Background(), "kgd-1", "Scouts")
+	require.NoError(t, err)
+	require.Equal(t, "arm-2", newID)
+	require.Equal(t, int32(2), calls.Load(), "split must invalidate the armies cache")
 }
