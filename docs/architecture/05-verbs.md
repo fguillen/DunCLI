@@ -423,6 +423,31 @@ the move removes the duplication and lets the new sibling file in
 the parent `verbs` package reuse the printer without exporting
 across package boundaries.
 
+### [trade/](../../internal/tui/verbs/trade/) — Phase 11
+
+The Phase 11 trade verbs live in their own subpackage (mirrors Phase
+8's `armies/` and Phase 9's `battles/` layout) because they introduce
+a new endpoint family and a non-trivial form. Wired into the registry
+via the blank import in
+[cmd/dun/main.go](../../cmd/dun/main.go) next to the existing
+subpackage imports.
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `caravan send <receiver-handle>` | `dispatchCaravan` | Splits an escort off a home army and dispatches a `caravan`-intent march to the receiver's home region. Form gathers payload (4 resources) + escort (one field per unit kind present in the source army). Light client-side validation only: non-negative ints, ≥1 payload entry, ≥1 escort unit. Capacity, stockpile, and reachability remain backend-authoritative per user direction at plan review |
+| `trade ledger [--player H] [--since 24h] [--limit N] [--page N]` | `listTradeLedger` | World-scoped, newest-first. One row per non-zero resource per caravan (a delivery of gold + wood produces two rows sharing a `caravan_id`). `--page` matches the spec's 1-based shape directly (does **not** mirror Phase 9's `--offset`); `--since` is regex-validated client-side to fail typos before the HTTP call |
+
+Interception combat is automatic from the player's point of view: a
+hostile army camped at the destination region triggers
+`Caravans::ResolveInterception` server-side and the result lands in
+the Phase 9 `battles` history alongside its `intercepted` ledger row.
+The trade subpackage never imports `battles/` or vice-versa.
+
+`caravan.go` carries the form + dispatch flow plus three small render
+helpers (`printCaravanPreview`, `printCaravanOrder`, `formatPayload`).
+`ledger.go` is the paginated list; `parseLedgerFlags` is exported only
+to its `_test.go` for table-driven flag-validation coverage.
+
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
 Tiny shared printers — currently just `printProfileRead`,
@@ -505,6 +530,22 @@ The existing list of flagged candidates as of Phase 8:
   `owner_handle`. `node attack` renders the owner as a raw ULID in
   both the picker description and the preview block. Mirror of the
   Phase 9 `attacker_handle` / `defender_handle` gap.
+- Phase 11: `listServerPlayers` is still absent (re-surfaced from
+  Phase 4 / 9 / 10). `caravan send <receiver-handle>` and
+  `trade ledger --player <handle>` have no tab completion — users must
+  know the handle.
+- Phase 11: `Caravan` response carries only kingdom IDs
+  (`sender_kingdom_id` / `receiver_kingdom_id`). `TradeLedgerEntry`
+  already snapshots `sender_handle` / `receiver_handle`; adding the
+  same fields to `Caravan` would let dispatch confirmation print the
+  receiver handle instead of relying on the verbatim input.
+- Phase 11: unit carrying-capacity stat is absent from the generated
+  `Unit` schema. The caravan form can't validate
+  `escort_units.capacity >= sum(payload)` client-side, so the only
+  feedback for an under-escorted dispatch is a backend 422
+  `insufficient_capacity`. Exposing per-unit capacity (or a precomputed
+  `caravan_capacity` on `Army`) would let the form show a live
+  capacity-vs-payload meter.
 
 Don't ship workarounds quietly.
 

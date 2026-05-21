@@ -1205,7 +1205,190 @@ Tab completion (`node capture <Tab>`, `node attack <Tab>`,
 `ruin claim <Tab>`) lists only the eligible regions for that specific
 flow — not every region on the map.
 
-## 16. Storage layout
+## 16. Trade
+
+Phase 11 adds two verbs: `caravan send` (dispatch a payload to another
+player) and `trade ledger` (paginated history of every transfer in the
+world). Both require a world in scope and a kingdom in it (i.e. you've
+already done `world join`):
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+Trade has no separate combat surface: if a hostile army is camped at
+the receiver's home region when your caravan arrives, the backend runs
+the interception combat automatically and the result lands in the
+Phase 9 `battles` history alongside its ledger entry.
+
+### `caravan send <receiver-handle>`
+
+Splits an escort off a home army, packs a payload of
+`gold|wood|stone|iron`, and dispatches a march with intent `caravan`
+to the receiver's home region. The CLI walks you through six steps:
+
+1. Validates the receiver handle (required positional arg).
+2. Lists your `home`-status armies — if exactly one, you'll see
+   `army: <name> (only home army)` and the picker is skipped.
+3. Opens a single form with one row per resource and one row per unit
+   kind present in the source army. Each row is pre-seeded to `0`.
+4. Prints the preview block.
+5. Confirms with a one-line interception nudge.
+6. Dispatches and prints the in-flight caravan plus a follow-up hint.
+
+```
+dun> caravan send ShadowWolf
+army: Garrison (only home army)
+```
+
+The form pops up next. With your composition being `archer=3, levy=12`
+and total capacity `60`, you'd see four payload rows followed by two
+escort rows:
+
+```
+gold to send                0
+wood to send                0
+stone to send               0
+iron to send                0
+escort archer (max 3)       0
+escort levy (max 12)        0
+```
+
+Fill in (say) `gold=100`, `wood=50`, `levy=5` and submit. The preview
+appears:
+
+```
+caravan dispatch preview
+  target:    ShadowWolf
+  payload:   gold=100 wood=50
+  escort:    levy=5
+  from:      Garrison at Greyhollow
+```
+
+Then the confirm prompt:
+
+```
+Dispatch caravan to ShadowWolf with Garrison?
+Caravans can be intercepted en route. Anything over the receiver's Warehouse cap on arrival is lost.
+> Yes   No
+```
+
+On `Yes`:
+
+```
+caravan car-1  (in_transit)
+  arrives:   2026-05-21 14:00 UTC  (ETA 2h)
+  path:      Greyhollow → Ironvale
+  payload:   gold=100 wood=50
+  escort:    levy=5
+  march:     mrc-1
+track delivery via `trade ledger`; interceptions also appear in `battles`
+```
+
+Resources leave your stockpile immediately at dispatch; escort units
+leave the source army's composition for the round trip. On a
+successful delivery the receiver's stockpile accrues `payload` capped
+at their current Warehouse — anything over is lost, same as a ruin
+claim. The escort returns to your kingdom on a follow-up march after
+delivery.
+
+Validation errors caught client-side:
+
+```
+dun> caravan send
+error: usage: caravan send <receiver-handle>
+
+dun> caravan send "   "
+error: receiver handle is required
+```
+
+Errors caught at submit time (form re-prompts on the first two):
+
+- `payload must include at least one positive resource`
+- `escort must include at least one unit`
+
+Errors that surface from the backend (the CLI deliberately doesn't
+pre-flight capacity, stockpile, or reachability — backend is
+authoritative):
+
+```
+dun> caravan send ShadowWolf
+error: insufficient_capacity (code=invalid, request_id=req-…)
+error: army_not_home (code=invalid, request_id=req-…)
+error: cross_world (code=invalid, request_id=req-…)
+error: receiver_not_found (code=not_found, request_id=req-…)
+```
+
+> Backend co-evolution candidates: (1) `listServerPlayers` is still
+> absent from the spec, so there's no tab completion on
+> `<receiver-handle>` (same gap as `player show`). (2) The `Caravan`
+> response carries only `sender_kingdom_id` / `receiver_kingdom_id`
+> — adding snapshotted handles (matching `TradeLedgerEntry`) would
+> let dispatch confirmations and `caravan show` (if/when added)
+> render player handles instead of raw IDs. (3) Per-unit carrying
+> capacity isn't surfaced on the `Unit` schema — exposing it (or a
+> precomputed `caravan_capacity` on `Army`) would let the form
+> render a real-time capacity hint instead of relying on the 422
+> `insufficient_capacity`.
+
+### `trade ledger [--player H] [--since 24h] [--limit N] [--page N]`
+
+World-scoped, newest-first. One row per non-zero resource per caravan
+(so a single delivery of gold + wood produces two rows with a shared
+`caravan_id`). Handles are snapshotted at dispatch so the ledger
+remains stable even if a player later changes their handle.
+
+```
+dun> trade ledger
+Trade ledger (page 1 of 4, showing 1-2 of 87):
+  2026-05-20 21:30 UTC  delivered     IronFist → ShadowWolf  gold      5000
+  2026-05-19 14:02 UTC  intercepted   IronFist → ShadowWolf  iron      400      attacker=RedTalon
+more: 85 remaining — `trade ledger --page 2`
+```
+
+Columns: recorded-at (UTC), status (`in_transit`, `delivered`,
+`intercepted`), `sender → receiver` handles, resource, amount, note.
+The `note` column collapses to empty for delivered / in-transit rows
+and to `attacker=<handle>` on intercepted rows.
+
+Flags compose:
+
+```
+dun> trade ledger --player IronFist --since 24h --limit 10
+Trade ledger (page 1 of 1, showing 1-3 of 3) [player=IronFist since=24h]:
+  ...
+```
+
+- `--player <handle>` matches sender, receiver, OR attacker.
+- `--since <duration>` accepts `24h`, `7d`, `30m`, `1h30m` shapes.
+  Anything else fails before the HTTP call:
+
+```
+dun> trade ledger --since yesterday
+error: --since must look like 24h, 7d, 30m, or 1h30m (got "yesterday")
+```
+
+- `--limit <N>` is 1–100 (matches the spec); `--page <N>` is 1-based.
+  Both validated client-side:
+
+```
+dun> trade ledger --limit 999
+error: --limit must be ≤ 100 (got 999)
+```
+
+When you have no entries yet:
+
+```
+dun> trade ledger
+Trade ledger:
+  (none)
+```
+
+Tab completion: `--since <Tab>` offers `1h / 24h / 7d / 30d`;
+`--limit <Tab>` offers `10 / 25 / 50 / 100`. `--player <Tab>` has no
+completer (same `listServerPlayers` gap as `caravan send`).
+
+## 17. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -1241,7 +1424,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

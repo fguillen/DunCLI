@@ -166,10 +166,12 @@ renders.
 
 ## What is _not_ here
 
-- **Phases 11–14** — trade, wonders, archive/hall-of-fame, packaging.
+- **Phases 12–14** — wonders, archive/hall-of-fame, packaging.
   None shipped yet; their docs will land with the work. (Phase 10
   shipped — see [05-verbs.md](05-verbs.md) "expeditions.go" and
-  [commands-reference.md](commands-reference.md) "Phase 10".)
+  [commands-reference.md](commands-reference.md) "Phase 10". Phase 11
+  shipped — see [05-verbs.md](05-verbs.md) "trade/" and
+  [commands-reference.md](commands-reference.md) "Phase 11".)
 - **Admin surface** — explicitly out of scope for v1. The
   `bearerSource.AdminBearer` security source returns an error rather
   than sending an empty token.

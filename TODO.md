@@ -328,13 +328,32 @@ singular `ruin` parent verb hosts the `claim` sub.
 
 operationIds: `dispatchCaravan`, `listTradeLedger`.
 
-- [ ] `caravan send <receiver-handle>` — `dispatchCaravan`; opens a
-      form for source army + payload + escort units with capacity
-      validation
-- [ ] `trade ledger [--player H] [--since 24h] [--limit N] [--page N]` —
-      `listTradeLedger`
-- [ ] Interception outcomes surfaced via the battle stream from
-      Phase 9
+- [x] `caravan send <receiver-handle>` — `dispatchCaravan`; opens a
+      form for source army + payload + escort units. Per user
+      direction at plan review, the CLI runs only light client-side
+      validation (non-negative ints, ≥1 payload entry, ≥1 escort
+      unit) — capacity / stockpile / reachability remain
+      backend-authoritative
+- [x] `trade ledger [--player H] [--since 24h] [--limit N] [--page N]` —
+      `listTradeLedger`. Matches the spec's 1-based `--page` (does
+      **not** mirror Phase 9's `--offset`); `--since` is
+      regex-validated client-side (`24h`, `7d`, `30m`, `1h30m`) before
+      the HTTP call
+- [x] Interception outcomes surfaced via the battle stream from
+      Phase 9 — automatic from the player's point of view; the trade
+      subpackage never imports `battles/`
+
+**Phase 11 also landed:** trade verbs live in a new
+[internal/tui/verbs/trade/](internal/tui/verbs/trade/) subpackage
+(mirrors Phase 8 / 9 layout — new endpoint family, non-trivial form,
+room for trade-local helpers). Backend co-evolution candidates flagged
+on the way in: (1) `listServerPlayers` still missing → no completer
+on `<receiver-handle>` or `--player` (re-surfaced from Phase 4 / 9 /
+10); (2) `Caravan` response carries only kingdom IDs (no
+`sender_handle` / `receiver_handle` snapshots — asymmetric with
+`TradeLedgerEntry`); (3) per-unit carrying capacity stat is absent
+from the generated `Unit` schema, so the caravan form can't surface a
+live capacity meter.
 
 ## Phase 12 — Wonders
 

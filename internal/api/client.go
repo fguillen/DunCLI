@@ -1124,6 +1124,89 @@ func (c *Client) ShowBattle(ctx context.Context, battleID string) (*gen.Battle, 
 	return battle, participants, err
 }
 
+// DispatchCaravan splits `escortUnits` off the home army `sourceArmyID`,
+// deducts `payload` from the sender's stockpile, and dispatches a march
+// with intent `caravan` toward the receiver's home region. On arrival
+// the backend either delivers (transferring resources to the receiver's
+// stockpile, warehouse-capped) or — if a hostile third-party army is
+// camped at the destination — runs the interception combat. Outcomes
+// surface in the Phase 9 battle stream and the world's trade ledger.
+func (c *Client) DispatchCaravan(ctx context.Context, kingdomID, receiverHandle, sourceArmyID string, payload, escortUnits map[string]int) (*gen.Caravan, error) {
+	req := &gen.DispatchCaravanReq{
+		ReceiverHandle: receiverHandle,
+		SourceArmyID:   sourceArmyID,
+		Payload:        gen.DispatchCaravanReqPayload(payload),
+		EscortUnits:    gen.DispatchCaravanReqEscortUnits(escortUnits),
+	}
+	var out *gen.Caravan
+	err := c.call(ctx, gen.DispatchCaravanOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.DispatchCaravan(ctx, req, gen.DispatchCaravanParams{KingdomID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Caravan:
+				out = v
+				return nil
+			case *gen.DispatchCaravanNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.DispatchCaravanUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.DispatchCaravanUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.DispatchCaravanOperation, res)
+		},
+	)
+	if err == nil && out != nil {
+		// Source army composition changed; invalidate the caller's army cache.
+		c.InvalidateArmies(kingdomID)
+	}
+	return out, err
+}
+
+// ListTradeLedger returns the world's trade ledger (one row per
+// non-zero resource per caravan), newest first. `limit` <= 0 falls
+// through to the spec default (25); `page` <= 0 means page 1. Returns
+// the page slice and the pagy meta so callers can render pagination
+// footers.
+func (c *Client) ListTradeLedger(ctx context.Context, worldID string, player, since string, limit, page int) ([]gen.TradeLedgerEntry, gen.ListTradeLedgerOKPagy, error) {
+	params := gen.ListTradeLedgerParams{WorldID: worldID}
+	if player != "" {
+		params.Player = gen.OptString{Value: player, Set: true}
+	}
+	if since != "" {
+		params.Since = gen.OptString{Value: since, Set: true}
+	}
+	if limit > 0 {
+		params.Limit = gen.OptInt{Value: limit, Set: true}
+	}
+	if page > 0 {
+		params.Page = gen.OptInt{Value: page, Set: true}
+	}
+	var entries []gen.TradeLedgerEntry
+	var pagy gen.ListTradeLedgerOKPagy
+	err := c.call(ctx, gen.ListTradeLedgerOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListTradeLedger(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListTradeLedgerOK:
+				entries = v.Entries
+				pagy = v.Pagy
+				return nil
+			case *gen.ListTradeLedgerNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListTradeLedgerUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListTradeLedgerOperation, res)
+		},
+	)
+	return entries, pagy, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.

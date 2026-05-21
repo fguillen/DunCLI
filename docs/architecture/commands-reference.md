@@ -133,6 +133,17 @@ outcome resolves at march arrival and surfaces through `battles`.
 | `node attack [<region>]` | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | [expeditions.go](../../internal/tui/verbs/expeditions.go) | Eligible regions: nodes owned by another kingdom. Same wire intent as `node capture` — backend dispatches `Nodes::Attack` vs `Nodes::Capture` based on the node's current owner. Walk-in vs PvP is opaque to the CLI |
 | `ruin claim [<region>]` | `listRuins`, `listKingdomArmies`, `dispatchMarch` (intent=`claim_ruin`) | [expeditions.go](../../internal/tui/verbs/expeditions.go) | Eligible regions: any ruin with `Claimed == false`. Preview embeds the §16.11 "anything over your Warehouse cap is lost" warning |
 
+### Phase 11 — Trade
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `caravan send <receiver-handle>` | `dispatchCaravan` | [trade/caravan.go](../../internal/tui/verbs/trade/caravan.go) | Splits escort off a home army, packs `gold`/`wood`/`stone`/`iron` payload, dispatches `caravan`-intent march. Form gathers payload + per-unit escort; only light client-side validation (non-negative ints, ≥1 payload entry, ≥1 escort unit). No `<receiver-handle>` completer — `listServerPlayers` gap |
+| `trade ledger [--player H] [--since 24h] [--limit N] [--page N]` | `listTradeLedger` | [trade/ledger.go](../../internal/tui/verbs/trade/ledger.go) | World-scoped, newest-first. `--page` matches the spec's 1-based shape (does **not** mirror Phase 9's `--offset`). `--since` regex-validated client-side; `--limit` capped at 100 |
+
+Interception combat lands in the Phase 9 `battles` history (when a
+hostile army is camped at the destination region), so the trade
+subpackage never imports `battles/` directly.
+
 ---
 
 ## Phases not yet shipped
@@ -142,7 +153,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 11 — Trade**: `dispatchCaravan`, `listTradeLedger`
 - **Phase 12 — Wonders**: `getWonder`, `startWonder`, `cancelWonder`,
   `repairWonder`, `payWonderMilestone`, `listWorldWonders`
 - **Phase 13 — Archive & Hall of Fame**: `getWorldArchive`,

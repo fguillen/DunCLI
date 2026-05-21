@@ -21,10 +21,12 @@ import (
 	// Verbs register themselves into shell's verb registry via init()
 	// — the blank imports below are what wire them in. Phases 4–7
 	// share the parent `verbs` package; Phase 8 (military) lives in
-	// the `armies` subpackage; Phase 9 (combat reports) in `battles`.
+	// the `armies` subpackage; Phase 9 (combat reports) in `battles`;
+	// Phase 11 (trade) in `trade`.
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs"
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/battles"
+	_ "github.com/fguillen/dun-cli/internal/tui/verbs/trade"
 )
 
 // Version is the CLI version string. Overridden via -ldflags at release time.
