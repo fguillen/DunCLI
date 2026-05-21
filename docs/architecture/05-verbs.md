@@ -1,16 +1,18 @@
 # 05 — Game Verbs
 
-Phases 4-9 of [TODO.md](../../TODO.md). The files under
+Phases 4-13 of [TODO.md](../../TODO.md). The files under
 [internal/tui/verbs/](../../internal/tui/verbs/) — one per logical
 area (servers, profile, players, worlds, regions, kingdom). Phase 8
 moves into a sibling subpackage at
 [internal/tui/verbs/armies/](../../internal/tui/verbs/armies/) so the
 military surface (train, armies, march) can be split across multiple
 files without crowding the parent. Phase 9 follows the same shape
-under [internal/tui/verbs/battles/](../../internal/tui/verbs/battles/).
-Each file registers its verbs into the shell's package-level registry
-via `init()`, then implements handlers that follow a tight, repeating
-shape.
+under [internal/tui/verbs/battles/](../../internal/tui/verbs/battles/);
+Phase 11 under [trade/](../../internal/tui/verbs/trade/); Phase 12
+under [wonders/](../../internal/tui/verbs/wonders/); Phase 13 under
+[archive/](../../internal/tui/verbs/archive/). Each file registers
+its verbs into the shell's package-level registry via `init()`, then
+implements handlers that follow a tight, repeating shape.
 
 If you're adding a new verb, this is the file. If you're debugging
 why a specific verb behaves the way it does, the per-file tour at the
@@ -39,6 +41,7 @@ func init() {
 
 ```go
 _ "github.com/fguillen/dun-cli/internal/tui/verbs"
+_ "github.com/fguillen/dun-cli/internal/tui/verbs/archive"
 _ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
 _ "github.com/fguillen/dun-cli/internal/tui/verbs/battles"
 ```
@@ -472,7 +475,7 @@ regression test (`TestWonderSlugsMatchSpec`) that pins the local list
 against `gen.WonderStartRequestName.AllValues()` — spec drift fails
 loudly.
 
-[render.go](../../internal/tui/verbs/wonders/render.go) holds the
+[render.go](../../internal/tui/verbs/render.go) holds the
 detail block printer (`printWonderDetail` — used by `show`, `start`,
 `repair`, `milestone`, `cancel` success paths) and the plural list
 printer. `renderResourceMap` is the wonder package's local copy of
@@ -482,6 +485,37 @@ because the trade and kingdom packages already have their own.
 The wonder verbs never import `battles/` even though trebuchet damage
 arrives via the Phase 9 battle stream — outcomes show up in
 `wonder show`'s lazy-applied HP read and `battles` independently.
+
+### [archive/](../../internal/tui/verbs/archive/) — Phase 13
+
+Two read-only verbs over the round-end snapshots: `archive` (per-world
+frozen state) and `hall-of-fame` (per-server leaderboards). They live
+in their own subpackage to mirror the Phase 8 / 9 / 11 / 12 layout
+even though only two operationIds land here — both verbs share the
+"no mutation, no Sub map" shape and the same `suggestAnyWorldSlug`
+sibling-package mirror.
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `archive [<world-slug>]` | `getWorldArchive` | No arg → in-scope world; arg overrides scope so users can read archives for worlds they never joined. Renders a flat aggregate block (regions / kingdoms / nodes / battles / caravans counts) + optional `Wonder:` block + `Top kingdoms` list capped at 5 sorted by `final_node_count` desc. 404 surfaces unchanged from the wrapper — both "still live" and "no archive row" look like `code=not_found` from here |
+| `hall-of-fame [--kind champions\|wreckers\|warlords\|veterans]` | `getHallOfFame` | Server-scoped read. No flag → all four boards capped at top 5 each, plus a `--kind <name>` hint for the full list. With `--kind` → only that board, full list. Client-side `--kind` validation against a hard-coded `leaderboardKinds` slice so a typo never reaches the spec's 422 |
+
+[archive.go](../../internal/tui/verbs/archive/archive.go) carries the
+verb registration, `runArchive`, the print helpers
+(`printArchive`, `renderTopKingdoms`), and the local
+`suggestAnyWorldSlug` (mirror of the same name in
+[verbs/worlds.go](../../internal/tui/verbs/worlds.go) which is
+package-private to `package verbs`).
+[hall_of_fame.go](../../internal/tui/verbs/archive/hall_of_fame.go)
+carries `runHallOfFame`, the per-board printer (`printLeaderboard`),
+the `leaderboardKinds` canonical-order slice + `kindHelp` label map,
+and the `suggestKinds` static completer.
+
+The print logic deliberately treats unknown leaderboard kinds gracefully
+— a backend that adds a new board name renders it after the four
+canonical ones with neutral `score=` / `secondary=` column labels, no
+truncation cap. Same defensive shape as `terrainGlyph` falling back to
+`?` in [regions.go](../../internal/tui/verbs/regions.go).
 
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
@@ -603,6 +637,24 @@ The existing list of flagged candidates as of Phase 8:
   `WonderListItem` (plural list) already has it. Adding it would let
   a future `wonder show <handle>` verb render someone else's wonder
   detail — today the singular `wonder` is your-own-only.
+- Phase 13: `RoundArchive.winner_kingdom_id` is a ULID with no
+  companion `winner_handle`. The archive renders the winner as a raw
+  ULID; embedding the snapshotted handle (mirroring how
+  `TradeLedgerEntry` already carries `sender_handle` /
+  `receiver_handle`) would close the gap.
+- Phase 13: `RoundArchive.frozen_state` is deeply nested with the
+  full per-region / per-kingdom roster on every call. The CLI today
+  renders aggregate counts plus a top-5 kingdoms highlight; a flatter
+  `archive_summary` projection (winner handle, top-3 kingdoms,
+  totals) would let the verb skip a second resolve and keep the wire
+  payload proportional to the screen output.
+- Phase 13: `LeaderboardEntry.player_profile_id` and `.handle` are
+  both nullable to support anonymized / deleted accounts, but
+  there's no flag that says "this used to be player X." The CLI
+  renders `(deleted)` for the handle and drops the entry's profile
+  link; a `was_deleted: true` (or `tombstoned_at`) field would let
+  the CLI render an explicit "[deleted]" placeholder instead of
+  conflating "anonymous" with "deleted."
 
 Don't ship workarounds quietly.
 

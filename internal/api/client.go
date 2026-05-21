@@ -1510,6 +1510,66 @@ func (c *Client) ListWorldWonders(ctx context.Context, worldID string) ([]gen.Wo
 	return out, err
 }
 
+// ShowWorldArchive fetches the immutable end-of-round snapshot for an
+// archived world (§16.6). The backend returns 404 while the world is
+// still live or has no archive row; callers receive that as an
+// `api.Error{Code: "not_found"}` and decide whether to translate it
+// into a friendlier "not archived yet" hint.
+func (c *Client) ShowWorldArchive(ctx context.Context, worldID string) (*gen.RoundArchive, error) {
+	var out *gen.RoundArchive
+	err := c.call(ctx, gen.GetWorldArchiveOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.GetWorldArchive(ctx, gen.GetWorldArchiveParams{WorldID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.RoundArchive:
+				out = v
+				return nil
+			case *gen.GetWorldArchiveNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.GetWorldArchiveUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.GetWorldArchiveOperation, res)
+		},
+	)
+	return out, err
+}
+
+// ShowHallOfFame fetches the four per-server leaderboard snapshots
+// (champions / wreckers / warlords / veterans). Passing a non-empty
+// `kind` restricts the response to one leaderboard; empty kind returns
+// all four. The backend rebuilds these snapshots only at round end
+// (§17.4), so the same call returns the same data between rounds.
+func (c *Client) ShowHallOfFame(ctx context.Context, serverID, kind string) (*gen.HallOfFame, error) {
+	params := gen.GetHallOfFameParams{ID: serverID}
+	if kind != "" {
+		params.Kind = gen.NewOptGetHallOfFameKind(gen.GetHallOfFameKind(kind))
+	}
+	var out *gen.HallOfFame
+	err := c.call(ctx, gen.GetHallOfFameOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.GetHallOfFame(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.HallOfFame:
+				out = v
+				return nil
+			case *gen.GetHallOfFameUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.GetHallOfFameForbidden:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.GetHallOfFameUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.GetHallOfFameOperation, res)
+		},
+	)
+	return out, err
+}
+
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
 // are revoked server-side as part of the same operation, so the caller
 // should also wipe its local credentials on success.

@@ -1650,7 +1650,150 @@ but each would simplify or strengthen a flow:
   `wonder show <handle>` verb render someone else's wonder detail —
   today the singular `wonder` is your-own-only.
 
-## 18. Storage layout
+## 18. Archive & Hall of Fame
+
+Phase 13 adds two read-only verbs over the round-end snapshots: `archive`
+(the immutable per-world state recorded at round end) and `hall-of-fame`
+(the per-server leaderboard snapshots, recomputed only at round end per
+§17.4). Both are pure reads — neither verb can mutate state. The archive
+becomes available the moment a world transitions to `archived`; the
+hall-of-fame is per-server and is rebuilt at every round end, so the
+same call returns the same data between rounds.
+
+### `archive [<world-slug>]` — frozen end-of-round snapshot
+
+With no arg, the verb reads the archive for the world currently in
+scope. Pass a `<world-slug>` to look up any archived world on the
+in-scope server — including ones you never joined. Tab completion
+(`archive <Tab>`) lists every world on the server.
+
+```
+dun> archive spring-2026
+World archive  (slug=spring-2026)
+  ended:     2026-05-21 12:00 UTC
+  winner:    kgd-7
+  wonder:    sky_tower
+  regions:   42
+  kingdoms:  5
+  nodes:     127
+  battles:   42
+  caravans:  17
+Wonder:
+  sky_tower  status=completed  hp=10000/10000  damage_events=3
+Top kingdoms (by final nodes):
+  1. IronFist        final_nodes=6  peak=8
+  2. ShadowWolf      final_nodes=2  peak=4  eliminated 2026-05-15 08:00 UTC
+```
+
+Columns and lines:
+
+- `ended:` is the UTC timestamp when the round ended.
+- `winner:` / `wonder:` are nullable — a round that ended without a
+  Wonder victory collapses both to `(none)`.
+- The `Wonder:` block only renders when `frozen_state.wonder` is
+  populated (any wonder built or destroyed during the round).
+- `Top kingdoms` is sorted by `final_node_count` desc with `peak_nodes`
+  as the tiebreaker, capped at 5 rows. Eliminated kingdoms keep their
+  ranking and get an `eliminated <UTC>` suffix.
+
+Scope guards mirror the rest of the CLI:
+
+```
+dun> archive
+error: not in a server scope — try `server join <slug>` first
+
+dun> archive
+error: not in a world scope — try `world join <slug>` first, or pass `archive <world-slug>`
+```
+
+While the world is still live (or genuinely has no archive row), the
+backend returns 404 and the verb surfaces it as the standard error
+line:
+
+```
+dun> archive spring-2026
+error: world is still live (code=not_found, request_id=req-…)
+```
+
+### `hall-of-fame [--kind champions|wreckers|warlords|veterans]`
+
+Server-scoped. With no flag, the verb prints all four leaderboards
+(capped at top 5 entries each) plus a hint to drill into one for the
+full list. With `--kind <name>`, only that leaderboard is fetched and
+rendered in full.
+
+```
+dun> hall-of-fame
+Hall of Fame  (server=acme)
+Champions  (snapshot 2026-05-20 00:00 UTC):
+   1. IronFist        wonders=3  destroyed=1  title=Champion
+   2. ShadowWolf      wonders=2  destroyed=0
+Wreckers  (no snapshot yet):
+  (none)
+Warlords  (snapshot 2026-05-20 00:00 UTC):
+   1. RedTalon        raids=99  victories=50
+   ... 12 more — `hall-of-fame --kind warlords`
+Veterans  (snapshot 2026-05-20 00:00 UTC):
+  (none)
+full list per board: `hall-of-fame --kind <champions|wreckers|warlords|veterans>`
+```
+
+Columns per board:
+
+- **Champions** — `wonders` (completed) and `destroyed` (wonders
+  destroyed as part of a coalition).
+- **Wreckers** — `destroyed` (wonders destroyed) and `rounds`
+  participated in.
+- **Warlords** — `raids` (launched) and `victories`.
+- **Veterans** — `rounds` (played) and `won`.
+
+Each row also renders an optional `title=<…>` suffix when the backend
+attached a snapshot title to the entry. Entries with a null handle —
+typically an anonymized / deleted player — render as `(deleted)`.
+
+Empty boards collapse to `(none)`. A board with `snapshot_at: null`
+(never computed) renders `(no snapshot yet)` in the header.
+
+Filtering by kind:
+
+```
+dun> hall-of-fame --kind warlords
+Hall of Fame  (server=acme)
+Warlords  (snapshot 2026-05-20 00:00 UTC):
+   1. RedTalon        raids=99  victories=50
+   2. IronFist        raids=42  victories=27
+   ...
+```
+
+Tab completion on `--kind <Tab>` lists the four valid values. Bad
+values fail before any HTTP call:
+
+```
+dun> hall-of-fame --kind rookies
+error: --kind must be one of champions/wreckers/warlords/veterans (got "rookies")
+```
+
+When a server has never had a round end yet, the response is empty
+and the verb prints a single hint:
+
+```
+dun> hall-of-fame
+Hall of Fame  (server=acme)
+no leaderboards available yet — snapshots are recomputed at round end
+```
+
+> Backend co-evolution candidates surfaced while shipping Phase 13:
+> (1) `RoundArchive.frozen_state` is deeply nested and the CLI only
+> renders the top aggregates plus a kingdom highlight — a flatter
+> `archive_summary` projection (winner handle, top-3 kingdoms, totals)
+> would let the verb run without a second resolve to translate
+> `winner_kingdom_id` into a player handle. (2) Both `RoundArchive`
+> and `Leaderboard` entries identify kingdoms / players by ID with
+> nullable `handle` fallbacks — embedding the snapshotted handle on
+> `RoundArchive.winner_kingdom_id` (mirroring `TradeLedgerEntry`)
+> would close the `winner: kgd-7` vs `winner: IronFist` gap.
+
+## 19. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -1686,7 +1829,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 19. Troubleshooting
+## 20. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

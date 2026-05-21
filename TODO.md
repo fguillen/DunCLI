@@ -410,10 +410,36 @@ future `wonder show <handle>` verb.
 
 operationIds: `getWorldArchive`, `getHallOfFame`.
 
-- [ ] `archive [<world-slug>]` — `getWorldArchive` (frozen
-      end-of-round snapshot; 404 while live handled gracefully)
-- [ ] `hall-of-fame [--kind champions|wreckers|warlords|veterans]` —
-      `getHallOfFame` for the in-scope server
+- [x] `archive [<world-slug>]` — `getWorldArchive` (frozen
+      end-of-round snapshot; 404 while live handled gracefully). No
+      arg defaults to the in-scope world; the optional slug arg looks
+      up any archived world on the in-scope server (even one the
+      caller never joined). Renders aggregate counts plus an optional
+      `Wonder:` block and a `Top kingdoms` highlight capped at 5 rows
+- [x] `hall-of-fame [--kind champions|wreckers|warlords|veterans]` —
+      `getHallOfFame` for the in-scope server. No flag → all four
+      boards capped at top 5 each with a `--kind <name>` drill-in
+      hint; `--kind` → full list for that board. Per-kind score /
+      secondary column labels mapped to the §17.4 categories
+      (wonders, destroyed, raids, victories, rounds, won)
+
+**Phase 13 also landed:** verbs live in a new
+[internal/tui/verbs/archive/](internal/tui/verbs/archive/) subpackage
+(mirrors Phase 8 / 9 / 11 / 12 layout — new endpoint family, room for
+future archive / leaderboard helpers). Backend co-evolution candidates
+flagged on the way in: (1) `RoundArchive.winner_kingdom_id` is a raw
+ULID without a companion `winner_handle` — the archive verb prints
+`winner: kgd-7` rather than `winner: IronFist`; mirroring the
+`TradeLedgerEntry.sender_handle` snapshotting pattern would close the
+gap; (2) `RoundArchive.frozen_state` is deeply nested with the full
+per-region / per-kingdom roster on every call — a flatter
+`archive_summary` projection (winner handle, top-3 kingdoms, totals)
+would let the verb skip a second resolve and keep the wire payload
+proportional to the screen output; (3) `LeaderboardEntry` has
+nullable `player_profile_id` / `handle` for anonymized / deleted
+accounts but no flag distinguishing the two — a `tombstoned_at` (or
+`was_deleted: true`) field would let the CLI render `[deleted]`
+rather than `(deleted)` for both.
 
 ## Phase 14 — Polish, packaging & distribution
 

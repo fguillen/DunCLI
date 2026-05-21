@@ -155,6 +155,13 @@ subpackage never imports `battles/` directly.
 | `wonder milestone [25\|50\|75]` | `payWonderMilestone` | [wonders/milestone.go](../../internal/tui/verbs/wonders/milestone.go) | Fetches wonder first; no-arg form auto-uses the pending percent. Mismatch + no-pending guards fire client-side before any HTTP call. Cost in the confirm comes from `pending_milestone_cost` (backend-provided) |
 | `wonders` | `listWorldWonders` | [wonders/list.go](../../internal/tui/verbs/wonders/list.go) | World-scoped public list. One row per wonder with builder handle, title-case name, status, HP fraction + percentage, started_at |
 
+### Phase 13 — Archive & Hall of Fame
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `archive [<world-slug>]` | `getWorldArchive` | [archive/archive.go](../../internal/tui/verbs/archive/archive.go) | No arg → in-scope world; arg overrides scope so users can read archives for worlds they never joined. Renders aggregate counts (regions / kingdoms / nodes / battles / caravans) plus an optional `Wonder:` block and a `Top kingdoms` highlight capped at 5 rows sorted by `final_node_count` desc. Backend returns 404 while the world is still live or has no archive row — both surface as `code=not_found` |
+| `hall-of-fame [--kind champions\|wreckers\|warlords\|veterans]` | `getHallOfFame` | [archive/hall_of_fame.go](../../internal/tui/verbs/archive/hall_of_fame.go) | Server-scoped. No flag → all four boards capped at top 5 each with a `--kind <name>` hint; `--kind` → full list for that board. Client-side `--kind` validation against a hard-coded slice so a typo never reaches the spec's 422. Snapshots are recomputed only at round end (§17.4); the verb prints `(no snapshot yet)` for boards the backend hasn't built |
+
 ---
 
 ## Phases not yet shipped
@@ -164,8 +171,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 13 — Archive & Hall of Fame**: `getWorldArchive`,
-  `getHallOfFame`
 - **Phase 14 — Polish, packaging & distribution**: no new endpoints
 
 ---
