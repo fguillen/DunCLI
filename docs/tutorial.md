@@ -1388,7 +1388,269 @@ Tab completion: `--since <Tab>` offers `1h / 24h / 7d / 30d`;
 `--limit <Tab>` offers `10 / 25 / 50 / 100`. `--player <Tab>` has no
 completer (same `listServerPlayers` gap as `caravan send`).
 
-## 17. Storage layout
+## 17. Wonders
+
+Phase 12 adds the wonder verbs — the §14 round-end mechanic. A wonder
+is a 13th-building-slot mega-project that takes ~120 hours from
+foundation payment to round-end consecration: pay 25% to start, build
+at 100 HP/h for 90 hours through three milestone payments at the 25 /
+50 / 75% thresholds, then survive the 24-hour Consecration phase
+where everyone else is trying to destroy it. If your wonder finishes
+Consecration intact, the round ends and you win.
+
+Six §14 wonder names exist — `sky_tower`, `eternal_citadel`,
+`cathedral_of_ages`, `library_of_worlds`, `crown_of_kings`,
+`black_spire`. They are mechanically identical; the choice is pure
+flavor. Throughout the CLI you refer to a wonder by its snake_case
+slug (e.g. `wonder start sky_tower`) and the prompt renders it back as
+the title-case display name (e.g. "Sky Tower").
+
+All `wonder` verbs require a world in scope and a kingdom in it (i.e.
+you have already done `world join`). Trying any of them before that
+fails before any HTTP call:
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+The plural `wonders` verb also requires world scope but doesn't need
+your kingdom — it shows the public, server-wide list.
+
+### `wonders` — list every wonder in the world
+
+```
+dun> wonders
+Wonders:
+  IronFist        Sky Tower           construction  hp=4200/10000 (42%)  started 2026-05-01 00:00 UTC
+  ShadowWolf      Eternal Citadel     foundation    hp=1000/1000 (100%)  started 2026-05-15 00:00 UTC
+```
+
+Columns: builder handle, title-case wonder name, status, HP fraction
+with percentage, started_at (UTC). Empty case:
+
+```
+dun> wonders
+Wonders:
+  (none)
+```
+
+### `wonder` / `wonder show` — your kingdom's wonder
+
+Bare `wonder` and explicit `wonder show` both render the detail block
+for *your* wonder (no `wonder show <handle>` for other players in v1
+— the backend co-evolution candidate at the bottom of this section
+notes the field that would make that possible).
+
+```
+dun> wonder show
+Sky Tower  (construction)
+  id:        wnd-1
+  builder:   (you)
+  hp:        4200/10000  (42%)
+  milestones: 25=paid  50=pending  75=pending
+  repaired this phase: foundation=0 construction=500 consecration=0  (cap 2000 each)
+  started:        2026-05-01 00:00 UTC
+  construction:   2026-05-01 00:00 UTC
+```
+
+When construction is paused at a milestone threshold, a callout
+appears with the exact payment cost lifted from the backend's
+`pending_milestone_cost` (no client-side §16.2 table — backend
+remains authoritative):
+
+```
+dun> wonder show
+Eternal Citadel  (construction)
+  id:        wnd-1
+  builder:   (you)
+  hp:        2500/10000  (25%)
+  milestones: 25=pending  50=pending  75=pending
+  pending milestone:
+    percent: 25%
+    cost:    gold=80000 wood=60000 stone=240000 iron=80000
+    note:    pay with `wonder milestone 25` to resume construction
+```
+
+If you don't have a wonder yet:
+
+```
+dun> wonder show
+no wonder under construction — try `wonder start <name>`
+```
+
+### `wonder start [<name>]` — begin construction
+
+With no arg, a picker opens over the six §14 names. With an arg, the
+slug is validated client-side; the backend enforces the §14
+prerequisites (Quarry / Siege Workshop gates, ≥3 owned nodes, no live
+wonder, stockpile ≥ foundation cost) before deducting the payment.
+
+```
+dun> wonder start
+Pick a wonder
+> Sky Tower
+  Eternal Citadel
+  Cathedral of Ages
+  Library of Worlds
+  Crown of Kings
+  Black Spire
+```
+
+After selection:
+
+```
+Begin construction of Sky Tower?
+Deducts the 25% foundation payment and locks your build queue until the wonder completes or is destroyed.
+> Yes   No
+started: Sky Tower — HP 1000/1000 (status=foundation). Pay milestones at 25/50/75% as construction crosses each threshold.
+track progress with `wonder show`; the world sees it via `wonders`
+```
+
+Direct arg form:
+
+```
+dun> wonder start sky_tower
+```
+
+Client-side guard:
+
+```
+dun> wonder start "Sky Tower"
+error: unknown wonder name "Sky Tower" (try one of: sky_tower, eternal_citadel, cathedral_of_ages, library_of_worlds, crown_of_kings, black_spire)
+```
+
+Backend rejections (e.g. prereqs not met) surface as the standard
+error line:
+
+```
+dun> wonder start sky_tower
+error: wonder_prereq_unmet (code=invalid, request_id=req-…)
+```
+
+Tab completion (`wonder start <Tab>`) lists the six slugs.
+
+### `wonder milestone [25|50|75]` — pay a pending milestone
+
+When construction crosses 25 / 50 / 75% HP, the backend auto-pauses
+and waits for the 10% milestone payment. Pay it to resume.
+
+With no arg, the verb uses the currently pending percent
+automatically — only one is ever pending at a time:
+
+```
+dun> wonder milestone
+Pay the 25% milestone for Sky Tower?
+Cost: gold=80000 wood=60000 stone=240000 iron=80000. Construction resumes immediately on success.
+> Yes   No
+paid milestone 25% on Sky Tower — construction resumed (HP 2500/10000).
+```
+
+With an arg, the verb validates that the requested percent is the one
+pending — a mismatch fails client-side before any HTTP call:
+
+```
+dun> wonder milestone 50
+error: milestone 50% is not pending (waiting for 25%)
+```
+
+If no milestone is currently paused:
+
+```
+dun> wonder milestone
+error: no milestone pending — construction is not paused at a threshold
+```
+
+Tab completion (`wonder milestone <Tab>`) lists `25 50 75`.
+
+### `wonder repair [<hp>]` — restore HP with Stone
+
+Costs 1 HP per 8 Stone, capped at 2000 HP per phase (foundation /
+construction / consecration each have independent caps). Each 500 HP
+repaired pauses construction for 30 minutes — useful for tanking a
+trebuchet hit, but a real cost during the 24-hour Consecration phase.
+
+With no arg, a single-field form opens:
+
+```
+dun> wonder repair
+Repair wonder
+> HP to repair (minimum 1; the backend clamps to the 2000 HP per-phase cap): 500
+```
+
+With an arg:
+
+```
+dun> wonder repair 500
+Repair 500 HP?
+Costs 8 Stone per HP. The backend clamps to the 2000 HP per-phase cap and pauses construction by 30 min per 500 HP repaired.
+> Yes   No
+repaired Sky Tower — HP 5000/10000 (status=construction).
+construction paused until 2026-05-21 13:00 UTC (29m)
+```
+
+Client-side guards:
+
+```
+dun> wonder repair 0
+error: hp must be a positive integer
+dun> wonder repair abc
+error: hp must be a positive integer
+```
+
+Backend rejections (e.g. exceeded per-phase cap, not enough Stone)
+surface as the standard error line:
+
+```
+dun> wonder repair 9999
+error: repair_cap_reached (code=invalid, request_id=req-…)
+```
+
+### `wonder cancel` — abandon construction (typed-confirm)
+
+Cancellation is destructive: every resource you've paid into the
+wonder so far is **lost**. The verb double-confirms by asking you to
+type the wonder's snake_case slug verbatim — no checkbox, no `[y/N]`.
+
+```
+dun> wonder cancel
+Cancel wonder
+> Type `sky_tower` to confirm cancellation (paid resources will be lost):
+```
+
+Mistyping (case-sensitive) keeps you in the form with an inline error
+until you type the slug or press Esc to abort. On success:
+
+```
+cancelled: Sky Tower — paid resources lost, build queue unlocked.
+```
+
+If you have no wonder to cancel:
+
+```
+dun> wonder cancel
+error: no wonder to cancel
+```
+
+### Backend co-evolution candidates (Phase 12)
+
+Three gaps surfaced while implementing this phase. None block the CLI,
+but each would simplify or strengthen a flow:
+
+- **`previewWonderStart` is absent.** Today the start confirm
+  describes the 25% foundation payment in prose but cannot show the
+  per-resource cost. A preview endpoint mirroring `previewBuildUpgrade`
+  would let the CLI render `cost: gold=… wood=… stone=… iron=…`
+  before deducting it.
+- **`previewWonderRepair` is absent.** Same problem for repair — the
+  CLI can't show the Stone cost, the per-phase remaining cap, or the
+  exact construction-pause minutes that the call will incur. The
+  current form trusts the user to know the §16.2 formula.
+- **`Wonder.builder_handle` is missing on the singular schema** (it
+  exists on `WonderListItem`). Adding it would let a future
+  `wonder show <handle>` verb render someone else's wonder detail —
+  today the singular `wonder` is your-own-only.
+
+## 18. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -1424,7 +1686,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 18. Troubleshooting
+## 19. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

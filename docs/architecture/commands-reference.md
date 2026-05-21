@@ -144,6 +144,17 @@ Interception combat lands in the Phase 9 `battles` history (when a
 hostile army is camped at the destination region), so the trade
 subpackage never imports `battles/` directly.
 
+### Phase 12 — Wonders
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `wonder` / `wonder show` | `getWonder` | [wonders/show.go](../../internal/tui/verbs/wonders/show.go) | Bare `wonder` routes to `show` (parent `Run`). The wrapper bypasses ogen because the spec's `oneOf: [Wonder, {wonder: null}]` 200 shape can't be decoded on the "no wonder" branch — flagged co-evolution. Returns `(nil, nil)` for "no wonder" so the verb prints `no wonder under construction — try \`wonder start <name>\`` |
+| `wonder start [<name>]` | `startWonder` | [wonders/start.go](../../internal/tui/verbs/wonders/start.go) | No arg → `selector.Pick` over the six §14 slugs. With arg → strict slug validation client-side. Confirm subtitle describes the 25% foundation payment + build-queue lock in prose; no per-resource cost (no `previewWonderStart` endpoint — flagged co-evolution) |
+| `wonder cancel` | `cancelWonder` | [wonders/cancel.go](../../internal/tui/verbs/wonders/cancel.go) | Typed-name double-confirm via `selector.Form` — user must type the wonder's snake_case slug verbatim (case-sensitive). Destructive: all paid resources are lost server-side |
+| `wonder repair [<hp>]` | `repairWonder` | [wonders/repair.go](../../internal/tui/verbs/wonders/repair.go) | No arg → single-field form. With arg → positive-integer guard. Confirm describes §16.2 in prose (8 Stone/HP, 2000 HP/phase cap, 30 min pause per 500 HP); no live numbers (no `previewWonderRepair` endpoint — flagged co-evolution) |
+| `wonder milestone [25\|50\|75]` | `payWonderMilestone` | [wonders/milestone.go](../../internal/tui/verbs/wonders/milestone.go) | Fetches wonder first; no-arg form auto-uses the pending percent. Mismatch + no-pending guards fire client-side before any HTTP call. Cost in the confirm comes from `pending_milestone_cost` (backend-provided) |
+| `wonders` | `listWorldWonders` | [wonders/list.go](../../internal/tui/verbs/wonders/list.go) | World-scoped public list. One row per wonder with builder handle, title-case name, status, HP fraction + percentage, started_at |
+
 ---
 
 ## Phases not yet shipped
@@ -153,8 +164,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 12 — Wonders**: `getWonder`, `startWonder`, `cancelWonder`,
-  `repairWonder`, `payWonderMilestone`, `listWorldWonders`
 - **Phase 13 — Archive & Hall of Fame**: `getWorldArchive`,
   `getHallOfFame`
 - **Phase 14 — Polish, packaging & distribution**: no new endpoints

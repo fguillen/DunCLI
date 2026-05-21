@@ -59,7 +59,7 @@ The docs go from **outside-in**: each file zooms one level deeper.
    every shipped verb and Cobra command, cross-linked to the
    `operationId` it calls.
 
-Phases 11–14 of [TODO.md](../../TODO.md) are not yet shipped; their
+Phases 13–14 of [TODO.md](../../TODO.md) are not yet shipped; their
 slots in this doc set will fill in as the work lands.
 
 ---

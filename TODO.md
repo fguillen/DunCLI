@@ -360,16 +360,51 @@ live capacity meter.
 operationIds: `getWonder`, `startWonder`, `cancelWonder`, `repairWonder`,
 `payWonderMilestone`, `listWorldWonders`.
 
-- [ ] `wonder` / `wonder show` — `getWonder` (lazy
-      `Wonders::ApplyConstruction`)
-- [ ] `wonder start <name>` — `startWonder`; selector for name from
-      the §14 fixed menu; 25% foundation payment with confirm
-- [ ] `wonder milestone <25|50|75>` — `payWonderMilestone`
-- [ ] `wonder repair <hp>` — `repairWonder` (1 HP per 8 Stone;
-      2000 HP/phase cap)
-- [ ] `wonder cancel` — `cancelWonder` (paid resources lost —
-      double-confirm with typed name to match)
-- [ ] `wonders` — `listWorldWonders` (public, in-scope world)
+- [x] `wonder` / `wonder show` — `getWonder` (lazy
+      `Wonders::ApplyConstruction`). The wrapper bypasses ogen for
+      this one endpoint because the spec's `oneOf: [Wonder, {wonder:
+      null}]` 200 shape trips ogen's sum-type discriminator on the
+      "no wonder" branch — flagged as a backend co-evolution
+      candidate. Returns `(nil, nil)` for "no wonder" so the verb
+      prints a friendly hint
+- [x] `wonder start <name>` — `startWonder`; selector for name from
+      the §14 fixed menu (slug value, title-case display); confirm
+      describes the 25% foundation payment in prose. No per-resource
+      cost surfaced — backend is authoritative; flagged
+      `previewWonderStart` as a co-evolution candidate
+- [x] `wonder milestone <25|50|75>` — `payWonderMilestone`. Fetches
+      `pending_milestone_percent` first and either auto-uses it (no
+      arg) or validates the supplied percent matches before the
+      confirm. Cost rendered in the confirm comes from
+      `pending_milestone_cost` (already backend-provided)
+- [x] `wonder repair <hp>` — `repairWonder` (1 HP per 8 Stone;
+      2000 HP/phase cap). No arg → single-field form; arg →
+      positive-integer guard. Confirm describes §16.2 rules in prose;
+      flagged `previewWonderRepair` as a co-evolution candidate
+- [x] `wonder cancel` — `cancelWonder` (paid resources lost). Typed-
+      name double-confirm via `selector.Form` — user must type the
+      wonder's snake_case slug verbatim before the destructive call
+      is made
+- [x] `wonders` — `listWorldWonders` (public, in-scope world); one
+      row per wonder with builder handle, title-case name, status,
+      HP fraction + percentage, started_at
+
+**Phase 12 also landed:** wonder verbs live in a new
+[internal/tui/verbs/wonders/](internal/tui/verbs/wonders/) subpackage
+(mirrors Phase 8 / 9 / 11 layout — new endpoint family, mix of picker /
+form / typed-confirm flows). The `getWonder` ogen-bypass workaround
+lives in [internal/api/client.go](internal/api/client.go) alongside a
+new `newRawRequest` helper so the raw call still routes through the
+shared `requestIDTransport` for X-Request-Id capture. Backend
+co-evolution candidates flagged on the way in: (1)
+`previewWonderStart` is missing → `wonder start` confirm has no per-
+resource cost; (2) `previewWonderRepair` is missing → `wonder repair`
+form has no live Stone cost or per-phase remaining cap; (3) `getWonder`
+200 response shape can't be decoded by ogen on the `{"wonder": null}`
+branch — flattening to a single nullable-`wonder` object would let
+ogen own it; (4) `Wonder.builder_handle` is missing from the singular
+schema (it exists on `WonderListItem`) — adding it would unblock a
+future `wonder show <handle>` verb.
 
 ## Phase 13 — Archive & Hall of Fame
 

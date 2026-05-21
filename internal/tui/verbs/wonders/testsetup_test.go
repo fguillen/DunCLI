@@ -1,0 +1,97 @@
+package wonders
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/fguillen/dun-cli/internal/api"
+	"github.com/fguillen/dun-cli/internal/tui/shell"
+)
+
+// newTestSession builds a *shell.Session pointed at the given httptest
+// handler. Trimmed copy of trade/armies/battles testsetup — every
+// verbs subpackage carries its own copy because the helper is
+// package-private.
+func newTestSession(t *testing.T, h http.HandlerFunc) (*shell.Session, *bytes.Buffer, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c, err := api.New(srv.URL+"/v1", api.StaticToken("t"), srv.Client())
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	sess := &shell.Session{
+		API:     c,
+		Cfg:     shell.ConfigSnapshot{BaseURL: srv.URL + "/v1"},
+		Creds:   shell.CredentialSnapshot{Email: "tester@example.com"},
+		Context: shell.NewContext(),
+		Out:     &out,
+		State:   noopState{},
+	}
+	return sess, &out, srv
+}
+
+type noopState struct{}
+
+func (noopState) Save(shell.ContextSnapshot) error { return nil }
+
+// wondersHandler stages the resolver chain (servers, worlds, showWorld
+// for my_kingdom) plus the Phase 12 routes tests merge in via `extra`.
+func wondersHandler(t *testing.T, extra map[string]http.HandlerFunc) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-"+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/servers":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"servers": []map[string]any{
+					{"id": "srv-1", "slug": "acme", "name": "Acme", "member": true},
+				},
+			})
+			return
+		case "/v1/servers/srv-1/worlds":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"worlds": []map[string]any{{
+					"id": "wld-1", "server_id": "srv-1", "slug": "spring-2026",
+					"name": "Spring 2026", "status": "active", "min_players": 8,
+					"t0_at": "2026-05-01T00:00:00Z",
+				}},
+			})
+			return
+		case "/v1/worlds/wld-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "wld-1", "server_id": "srv-1", "slug": "spring-2026",
+				"name": "Spring 2026", "status": "active", "min_players": 8,
+				"t0_at":        "2026-05-01T00:00:00Z",
+				"region_count": 2, "kingdom_count": 1,
+				"my_kingdom": map[string]any{
+					"id": "kgd-1", "world_id": "wld-1",
+					"stockpiles": map[string]any{},
+					"joined_at":  "2026-05-01T00:00:00Z",
+				},
+			})
+			return
+		}
+		if h, ok := extra[r.URL.Path]; ok {
+			h(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}
+}
+
+// setupWondersSession builds a session scoped at (acme, spring-2026)
+// with kingdom kgd-1 resolved via showWorld.my_kingdom.
+func setupWondersSession(t *testing.T, extra map[string]http.HandlerFunc) (*shell.Session, *bytes.Buffer) {
+	t.Helper()
+	s, o, _ := newTestSession(t, wondersHandler(t, extra))
+	s.Context.SetServer("acme")
+	s.Context.SetWorld("spring-2026")
+	return s, o
+}

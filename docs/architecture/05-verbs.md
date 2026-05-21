@@ -448,6 +448,41 @@ helpers (`printCaravanPreview`, `printCaravanOrder`, `formatPayload`).
 `ledger.go` is the paginated list; `parseLedgerFlags` is exported only
 to its `_test.go` for table-driven flag-validation coverage.
 
+### [wonders/](../../internal/tui/verbs/wonders/) — Phase 12
+
+The Phase 12 wonder verbs live in their own subpackage (mirrors Phase
+8 / 9 / 11) because they introduce a new endpoint family (six new
+operations) and three distinct UX shapes — picker + confirm, single
+text-field typed-confirm, single integer form. Wired via the blank
+import in [cmd/dun/main.go](../../cmd/dun/main.go) next to the other
+subpackage imports.
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `wonder` / `wonder show` | `getWonder` | Bare `wonder` routes to `show` (parent `Run` is the show handler, same pattern as Phase 7's `kingdom`). The wrapper bypasses ogen for this one endpoint because the spec's `oneOf: [Wonder, {wonder: null}]` 200 shape trips ogen's sum-type discriminator on the literal `{"wonder": null}` body; the raw call still routes through the shared `requestIDTransport` so X-Request-Id capture is identical. Returns `(nil, nil)` for "no wonder" so callers render a friendly hint instead of inspecting the union |
+| `wonder start [<name>]` | `startWonder` | No arg → `selector.Pick` over the 6 §14 slugs (title display, slug value). With arg → strict slug validation client-side. Confirm has no per-resource cost because there's no `previewWonderStart` endpoint (flagged below); the prose mentions the 25% foundation payment |
+| `wonder cancel` | `cancelWonder` | Typed-confirm via `selector.Form` with a single text field. Validate fn rejects anything but the wonder's snake_case slug verbatim (case-sensitive). ESC aborts cleanly. The destructive action runs only on validator pass |
+| `wonder repair [<hp>]` | `repairWonder` | No arg → single-field form for HP. With arg → positive-integer guard. Confirm subtitle describes the §16.2 rules in prose (8 Stone/HP, 2000 HP/phase cap, 30 min pause per 500 HP); no client-side cost rendering because there's no `previewWonderRepair` endpoint (flagged below) |
+| `wonder milestone [25\|50\|75]` | `payWonderMilestone` | Fetches the wonder first to read `pending_milestone_percent`. No arg → uses the pending percent automatically (only one is ever pending; mirrors Phase 11's "only home army" auto-pick). With arg → validates the percent against the spec enum AND that it matches the pending state; mismatch fails client-side. Cost shown in the confirm comes from `pending_milestone_cost` (backend-provided, no client table) |
+| `wonders` | `listWorldWonders` | Plural top-level world-scoped public list. One row per wonder with builder handle, title name, status, HP fraction + percentage, and started_at (UTC) |
+
+The slug → title-case rendering lives in [names.go](../../internal/tui/verbs/wonders/names.go),
+which also carries the `validWonderSlug` strict-membership check and a
+regression test (`TestWonderSlugsMatchSpec`) that pins the local list
+against `gen.WonderStartRequestName.AllValues()` — spec drift fails
+loudly.
+
+[render.go](../../internal/tui/verbs/wonders/render.go) holds the
+detail block printer (`printWonderDetail` — used by `show`, `start`,
+`repair`, `milestone`, `cancel` success paths) and the plural list
+printer. `renderResourceMap` is the wonder package's local copy of
+the gold/wood/stone/iron canonical-order formatter — kept private
+because the trade and kingdom packages already have their own.
+
+The wonder verbs never import `battles/` even though trebuchet damage
+arrives via the Phase 9 battle stream — outcomes show up in
+`wonder show`'s lazy-applied HP read and `battles` independently.
+
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
 Tiny shared printers — currently just `printProfileRead`,
@@ -546,6 +581,28 @@ The existing list of flagged candidates as of Phase 8:
   `insufficient_capacity`. Exposing per-unit capacity (or a precomputed
   `caravan_capacity` on `Army`) would let the form show a live
   capacity-vs-payload meter.
+- Phase 12: no `previewWonderStart` endpoint. The `wonder start`
+  confirm describes the 25% foundation payment in prose but cannot
+  show the per-resource cost client-side (backend remains
+  authoritative on §16.2 totals). A read-only preview mirroring
+  `previewBuildUpgrade` would close the loop.
+- Phase 12: no `previewWonderRepair` endpoint. `wonder repair` can't
+  show the exact Stone cost, the remaining per-phase cap, or the
+  construction-pause minutes the call will incur — the form trusts
+  the user to know the §16.2 formula. Same shape as the wonder-start
+  ask: a preview endpoint returning `{stone_cost, effective_hp,
+  paused_minutes_added}` would let the CLI render the consequences
+  before commit.
+- Phase 12: the spec's `getWonder` 200 response uses
+  `oneOf: [Wonder, {wonder: null}]`. ogen cannot decode the "no
+  wonder" branch on a `{"wonder": null}` body (sum-type discriminator
+  rejects null) — the wrapper bypasses ogen for this one endpoint.
+  Flattening the shape to a single object with a nullable `wonder`
+  field (no `oneOf`) would let ogen handle it directly.
+- Phase 12: `Wonder.builder_handle` is missing on the singular schema.
+  `WonderListItem` (plural list) already has it. Adding it would let
+  a future `wonder show <handle>` verb render someone else's wonder
+  detail — today the singular `wonder` is your-own-only.
 
 Don't ship workarounds quietly.
 

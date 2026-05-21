@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -20,6 +22,17 @@ type Client struct {
 	gen    *gen.Client
 	logger *slog.Logger
 	cache  *resolverCache
+
+	// httpClient + baseURL + tp are retained so a small number of
+	// wrappers can bypass ogen for endpoints whose OpenAPI shape ogen
+	// cannot decode cleanly. Today only GetWonder uses these, because
+	// its `oneOf: [Wonder, {wonder: null}]` 200 body trips ogen's
+	// sum-type discriminator when the "no wonder" branch is hit. The
+	// existing requestIDTransport stays on httpClient, so X-Request-Id
+	// capture and 429 handling work identically to the ogen path.
+	httpClient *http.Client
+	baseURL    string
+	tp         TokenProvider
 }
 
 // New constructs a Client. baseURL is the API root including the version
@@ -50,9 +63,12 @@ func New(baseURL string, tp TokenProvider, hc *http.Client) (*Client, error) {
 	}
 
 	return &Client{
-		gen:    gc,
-		logger: slog.Default(),
-		cache:  newResolverCache(),
+		gen:        gc,
+		logger:     slog.Default(),
+		cache:      newResolverCache(),
+		httpClient: hc,
+		baseURL:    baseURL,
+		tp:         tp,
 	}, nil
 }
 
@@ -1205,6 +1221,293 @@ func (c *Client) ListTradeLedger(ctx context.Context, worldID string, player, si
 		},
 	)
 	return entries, pagy, err
+}
+
+// GetWonder fetches the caller's wonder for the given kingdom. The
+// backend lazy-applies construction (`Wonders::ApplyConstruction`)
+// before serializing, so the returned HP / paused_until reflects the
+// current moment. The 200 response is a `oneOf`: either a Wonder
+// payload (kingdom has a live wonder) or `{wonder: null}` (no wonder
+// under construction). The wrapper collapses the latter to (nil, nil)
+// so UI code can render a "no wonder" message.
+//
+// This call bypasses ogen for one reason: the spec's `oneOf` shape on
+// the 200 response has no usable discriminator when the "no wonder"
+// branch is hit — ogen's generated sum-type decoder fails with
+// "unable to detect sum type variant" on a literal `{"wonder": null}`
+// body. Backend co-evolution candidate: flatten the response to a
+// single object with a nullable `wonder` field (no `oneOf`) so ogen
+// can decode it directly. The raw call still goes through the shared
+// requestIDTransport for X-Request-Id capture and 429 handling.
+func (c *Client) GetWonder(ctx context.Context, kingdomID string) (*gen.Wonder, error) {
+	ctx, meta := withMeta(ctx)
+	start := time.Now()
+
+	req, err := c.newRawRequest(ctx, http.MethodGet,
+		fmt.Sprintf("/kingdoms/%s/wonder", kingdomID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("api %s: %w", gen.GetWonderOperation, err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logTransportErr(ctx, gen.GetWonderOperation, meta, err, start)
+		return nil, fmt.Errorf("api %s: %w", gen.GetWonderOperation, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if meta.rateLimit != nil {
+		c.logAPIErr(ctx, gen.GetWonderOperation, meta, meta.rateLimit, start)
+		return nil, meta.rateLimit
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logTransportErr(ctx, gen.GetWonderOperation, meta, err, start)
+		return nil, fmt.Errorf("api %s: %w", gen.GetWonderOperation, err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Peek the body: a wonder payload has top-level `id`/`name`/`hp`
+		// fields; the "no wonder" payload is `{"wonder": ...}` (and the
+		// inner value is null today). Distinguish on the presence of the
+		// `wonder` envelope key.
+		var envelope struct {
+			Wonder *json.RawMessage `json:"wonder"`
+		}
+		_ = json.Unmarshal(body, &envelope)
+		// If the parsed envelope has exactly the `wonder` key set (with
+		// any value, null or otherwise), there is no live wonder. The
+		// spec's example pins value=null; we accept anything to stay
+		// forward-compatible.
+		if isWonderNullEnvelope(body) {
+			c.logger.LogAttrs(ctx, slog.LevelDebug, "api ok",
+				slog.String("op", gen.GetWonderOperation),
+				slog.String("request_id", meta.requestID),
+				slog.Int("http_status", meta.status),
+				slog.Duration("elapsed", time.Since(start)),
+			)
+			return nil, nil
+		}
+		var w gen.Wonder
+		if err := json.Unmarshal(body, &w); err != nil {
+			c.logTransportErr(ctx, gen.GetWonderOperation, meta,
+				fmt.Errorf("decode wonder: %w", err), start)
+			return nil, fmt.Errorf("api %s: decode wonder: %w",
+				gen.GetWonderOperation, err)
+		}
+		c.logger.LogAttrs(ctx, slog.LevelDebug, "api ok",
+			slog.String("op", gen.GetWonderOperation),
+			slog.String("request_id", meta.requestID),
+			slog.Int("http_status", meta.status),
+			slog.Duration("elapsed", time.Since(start)),
+		)
+		return &w, nil
+
+	case http.StatusUnauthorized, http.StatusNotFound:
+		var env gen.ErrorEnvelope
+		_ = json.Unmarshal(body, &env)
+		derr := fromEnvelope(&env, meta.requestID)
+		c.logAPIErr(ctx, gen.GetWonderOperation, meta, derr, start)
+		return nil, derr
+	}
+
+	derr := fmt.Errorf("api %s: unexpected status %d", gen.GetWonderOperation, resp.StatusCode)
+	c.logTransportErr(ctx, gen.GetWonderOperation, meta, derr, start)
+	return nil, derr
+}
+
+// newRawRequest builds a request scoped to the configured base URL and
+// installs the bearer token from c.tp (when present). The
+// requestIDTransport on c.httpClient handles X-Request-Id + 429
+// capture, so callers using this helper get the same observability as
+// ogen-routed wrappers.
+func (c *Client) newRawRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	url := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.tp != nil {
+		tok, err := c.tp.Token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+// isWonderNullEnvelope reports whether body is the spec's "no wonder"
+// envelope shape — an object whose only top-level key is `wonder`,
+// with a null (or otherwise non-Wonder) value. Distinguishes from a
+// real Wonder payload which has many top-level fields including `id`,
+// `kingdom_id`, `name`, `status`, `hp`.
+func isWonderNullEnvelope(body []byte) bool {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return false
+	}
+	if _, hasID := obj["id"]; hasID {
+		return false
+	}
+	_, hasWonder := obj["wonder"]
+	return hasWonder
+}
+
+// StartWonder begins wonder construction in the caller's kingdom. The
+// backend validates §14 prerequisites (building gates, ≥3 owned nodes,
+// no live wonder), deducts the 25% foundation payment, and locks the
+// build queue. On success the kingdom cache is invalidated so the next
+// `kingdom` reflects the deducted stockpile.
+func (c *Client) StartWonder(ctx context.Context, kingdomID, name string) (*gen.Wonder, error) {
+	req := &gen.WonderStartRequest{Name: gen.WonderStartRequestName(name)}
+	var out *gen.Wonder
+	err := c.call(ctx, gen.StartWonderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.StartWonder(ctx, req, gen.StartWonderParams{KingdomID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Wonder:
+				out = v
+				return nil
+			case *gen.StartWonderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.StartWonderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.StartWonderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.StartWonderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// CancelWonder abandons the caller's wonder. Paid resources are lost
+// and the build queue unlocks. The returned Wonder is the now-destroyed
+// snapshot.
+func (c *Client) CancelWonder(ctx context.Context, kingdomID string) (*gen.Wonder, error) {
+	var out *gen.Wonder
+	err := c.call(ctx, gen.CancelWonderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.CancelWonder(ctx, gen.CancelWonderParams{KingdomID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Wonder:
+				out = v
+				return nil
+			case *gen.CancelWonderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.CancelWonderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.CancelWonderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// RepairWonder spends Stone to restore wonder HP (1 HP per 8 Stone).
+// The backend clamps `hp` to the per-phase 2000 HP cap (foundation /
+// construction / consecration each track independently); the returned
+// Wonder reflects the actual repair plus any construction pause from
+// the 30 min/500 HP rule.
+func (c *Client) RepairWonder(ctx context.Context, kingdomID string, hp int) (*gen.Wonder, error) {
+	req := &gen.WonderRepairRequest{Hp: hp}
+	var out *gen.Wonder
+	err := c.call(ctx, gen.RepairWonderOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.RepairWonder(ctx, req, gen.RepairWonderParams{KingdomID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Wonder:
+				out = v
+				return nil
+			case *gen.RepairWonderNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RepairWonderUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.RepairWonderUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.RepairWonderOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// PayWonderMilestone deducts the 10% milestone payment (25%, 50%, or
+// 75%) and resumes construction. The backend rejects calls when no
+// milestone is pending or when the percent doesn't match the active
+// threshold.
+func (c *Client) PayWonderMilestone(ctx context.Context, kingdomID string, percent int) (*gen.Wonder, error) {
+	req := &gen.WonderMilestoneRequest{Percent: gen.WonderMilestoneRequestPercent(percent)}
+	var out *gen.Wonder
+	err := c.call(ctx, gen.PayWonderMilestoneOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.PayWonderMilestone(ctx, req, gen.PayWonderMilestoneParams{KingdomID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.Wonder:
+				out = v
+				return nil
+			case *gen.PayWonderMilestoneNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PayWonderMilestoneUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PayWonderMilestoneUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.PayWonderMilestoneOperation, res)
+		},
+	)
+	if err == nil {
+		c.InvalidateKingdom(kingdomID)
+	}
+	return out, err
+}
+
+// ListWorldWonders returns every wonder in the in-scope world (the
+// public, server-wide view used by the plural `wonders` verb). One row
+// per wonder, ordered by creation time.
+func (c *Client) ListWorldWonders(ctx context.Context, worldID string) ([]gen.WonderListItem, error) {
+	var out []gen.WonderListItem
+	err := c.call(ctx, gen.ListWorldWondersOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListWorldWonders(ctx, gen.ListWorldWondersParams{WorldID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListWorldWondersOK:
+				out = v.Wonders
+				return nil
+			case *gen.ListWorldWondersNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListWorldWondersUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListWorldWondersOperation, res)
+		},
+	)
+	return out, err
 }
 
 // DeleteAccount irreversibly deletes the caller's account. All ApiKeys
