@@ -1045,7 +1045,167 @@ dun> battle show bat-xxxx
 error: not found (code=not_found, request_id=req-…)
 ```
 
-## 15. Storage layout
+## 15. Captures, attacks, and ruin claims
+
+Phase 10 adds three guided wizards that compose the existing march
+dispatch with target discovery. They require a world in scope and a
+kingdom in it (i.e. you have already done `world join`):
+
+```
+error: not in a world scope — try `world join <slug>` first
+```
+
+None of them adds a new endpoint — under the hood they all call
+`dispatchMarch` with the right intent (`capture` for both node verbs,
+`claim_ruin` for the ruin verb). The actual outcome (combat
+resolution, ownership transfer, cache grant) happens server-side when
+the march arrives at the target region. Follow it via `battles` once
+the dispatch lands.
+
+Every flow follows the same six steps:
+
+1. The CLI lists the regions eligible for that specific flow.
+2. You pick one — by typing the region name, or via the selector if
+   you omit the argument.
+3. The CLI lists your home-status armies. If there's exactly one
+   you'll see `army: <name> (only home army)` and the picker is
+   skipped. Otherwise you pick.
+4. A short preview block prints the target, the node/ruin detail, the
+   chosen army, and the wire intent.
+5. A yes/no confirm with a flow-specific subtitle.
+6. On yes the march is dispatched, the dispatched-order block is
+   printed (same shape as Phase 8's `march`), and a one-line follow-
+   up hint points you at `battles`.
+
+A confirm of `No` prints `aborted` and dispatches nothing.
+
+### `node capture [<region>]` — wilderness node capture
+
+Eligible regions: any region containing a **wilderness** node (no
+owner, not a home-hoard).
+
+```
+dun> node capture
+Pick a wilderness node to capture
+> Ironvale            nodes=iron/rich
+  Greyhollow          nodes=gold/standard
+```
+
+Picking Ironvale:
+
+```
+node capture preview
+  target:    Ironvale
+  detail:
+    iron/rich  owner=(wild)  garrison=pikeman=8
+  army:      Garrison (cap=60, archer=3, levy=12)
+  intent:    capture
+Dispatch capture march to Ironvale with Garrison?
+Wilderness garrisons don't retreat. Catapults are required to break them.
+> Yes   No
+```
+
+On `Yes`:
+
+```
+march mrc-1  (capture)
+  army:      arm-1
+  arrives:   2026-05-21 02:00 UTC  (ETA 2h)
+  path:      Greyhollow → Ironvale
+track this fight with `battles` — outcome surfaces when the march arrives
+```
+
+**Note on Catapults.** The dun §9 design requires a Catapult to break
+a wilderness garrison. The CLI deliberately does **not** enforce this
+client-side — the confirm subtitle is an honest non-blocking nudge,
+and the arrival-time defeat (if you dispatched without one) shows up
+in `battles` like any other lost fight.
+
+Passing the region as an argument skips the first picker:
+
+```
+dun> node capture Ironvale
+```
+
+Common errors caught client-side:
+
+```
+dun> node capture Greyhollow
+error: region "Greyhollow" not eligible for node capture (try: Ironvale)
+```
+
+```
+dun> node capture
+error: no wilderness nodes to capture in this world
+```
+
+### `node attack [<region>]` — foreign-owned node attack
+
+Eligible regions: any region containing a node owned by **another**
+kingdom (not yours, not a home-hoard).
+
+```
+dun> node attack
+Pick a foreign-owned node to attack
+> Highmoor            owner=kgd-9  nodes=stone/standard
+```
+
+The preview shows the current owner — rendered as a ULID today,
+flagged upstream as a backend co-evolution candidate (an
+`owner_handle` mirror of Phase 9's `attacker_handle` gap).
+
+The confirm subtitle hedges on walk-in vs PvP:
+
+```
+Dispatch capture march to Highmoor with Garrison?
+This may be a walk-in or contested — the CLI can't tell if a defending army is present.
+> Yes   No
+```
+
+Why "may be"? The backend dispatches `Nodes::Attack` either way; if
+the defending kingdom has an army at the region on arrival, combat
+resolves; if not, ownership transfers without a fight. Either way the
+outcome lands in `battles`.
+
+### `ruin claim [<region>]` — ruin claim
+
+Eligible regions: any region with an **unclaimed** ruin.
+
+```
+dun> ruin claim
+Pick an unclaimed ruin
+> Ironvale            tier=major  cache=gold=800, iron=200
+```
+
+Preview:
+
+```
+ruin claim preview
+  target:    Ironvale
+  detail:
+    tier:       major
+    garrison:   archer=4, levy=12
+    cache:      gold=800, iron=200
+    warning:    cache is granted to your home stockpile on success — anything over your Warehouse cap is lost
+  army:      Garrison (cap=60, archer=3, levy=12)
+  intent:    claim_ruin
+Dispatch claim_ruin march to Ironvale with Garrison?
+Ruin garrisons defend with the same combat resolver as wilderness nodes.
+> Yes   No
+```
+
+The **Warehouse cap warning** matters: per §16.11 the cache is
+granted instantly to your home stockpile on a successful claim, and
+anything over your current Warehouse cap is **lost**. If your
+Warehouse is L0 (1000 cap) and you claim a Major ruin (up to 25k
+mixed resources), most of the cache evaporates. Upgrade Warehouse
+before claiming a big ruin.
+
+Tab completion (`node capture <Tab>`, `node attack <Tab>`,
+`ruin claim <Tab>`) lists only the eligible regions for that specific
+flow — not every region on the map.
+
+## 16. Storage layout
 
 Everything the CLI persists lives under a single `~/.dun/` directory
 (mode `0700`):
@@ -1081,7 +1241,7 @@ to. When the shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
 you into someone else's server.
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either

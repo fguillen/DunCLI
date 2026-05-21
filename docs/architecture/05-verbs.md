@@ -314,7 +314,7 @@ another API call.
 because `WorldSummary` doesn't carry membership info — once we can
 distinguish member vs eligible we'll split.
 
-### [regions.go](../../internal/tui/verbs/regions.go) — Phase 6
+### [regions.go](../../internal/tui/verbs/regions.go) — Phase 6 + Phase 10
 
 | Verb | operationId | Notes |
 |---|---|---|
@@ -323,6 +323,9 @@ distinguish member vs eligible we'll split.
 | `ruins` | `listRuins` | Tier + claimed state + garrison composition |
 | `nodes [--owner mine\|wild\|captured\|home-hoard]` | `listNodes` | Client-side filtering: the spec has no server-side filter. The `mine` / `captured` filters trigger a `ResolveKingdom` only when needed — don't burn the extra HTTP call when the user just types `nodes` |
 | `node show <id-or-region>` | `showRegion` or `showNode` | Tries arg first as a region name (the common case); falls back to ULID. Multiple nodes in a region → error listing the IDs |
+| `node capture [<region>]` (Phase 10) | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | Sub-verb on the existing `node` parent. Implementation in sibling [expeditions.go](../../internal/tui/verbs/expeditions.go) |
+| `node attack [<region>]` (Phase 10) | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | Sub-verb on the existing `node` parent. Same wire intent as `node capture` — backend dispatches `Nodes::Attack` based on the node's owner |
+| `ruin claim [<region>]` (Phase 10) | `listRuins`, `listKingdomArmies`, `dispatchMarch` (intent=`claim_ruin`) | Sub-verb on a brand-new singular `ruin` parent verb (the plural `ruins` listing remains a separate top-level). Mirrors the `army` (mutate) vs `armies` (list) split |
 
 `terrainGlyph` falls back to `?` on an unknown enum so a spec drift
 doesn't crash the render — the user sees the unknown terrain and the
@@ -390,6 +393,36 @@ pin them against `gen.QueueTrainingOrderReqBuilding.AllValues()` and
 `compositionString`, `shortKingdom`, `formatOptFloat`) that other
 files in the subpackage don't need.
 
+### [expeditions.go](../../internal/tui/verbs/expeditions.go) — Phase 10
+
+Three guided wizards that compose Phase 6 (target discovery) with
+Phase 8 (march dispatch). All three live in one file because they
+share a `runExpedition` helper that does the same six steps with
+flow-specific predicates and labels: scope guard → target discovery
+→ target pick → home-army pick → preview + confirm → dispatch +
+render + follow-up hint.
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `node capture [<region>]` | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | Eligible regions: at least one node where `OwnerKingdomID` is unset and `IsHomeHoard == false`. Preview shows the static garrison from `Node.Garrison`. **No client-side Catapult check** — backend is authoritative per user direction at plan review |
+| `node attack [<region>]` | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | Eligible regions: at least one node owned by another kingdom. Same wire intent as `node capture` — backend chooses `Nodes::Attack` vs `Nodes::Capture` based on the node's current owner. CLI can't tell walk-in vs PvP up front |
+| `ruin claim [<region>]` | `listRuins`, `listKingdomArmies`, `dispatchMarch` (intent=`claim_ruin`) | Eligible regions: any ruin with `Claimed == false`. Preview embeds the §16.11 warehouse-cap warning verbatim |
+
+The handlers feed selector items keyed by region ULID (not name) so
+the post-pick lookup is O(1) and doesn't risk a duplicate-name
+collision. Region-arg resolution is **case-insensitive** to match
+how users typically copy-paste from `nodes` / `ruins` output. The
+home-army pick auto-selects when there's exactly one home army,
+printing an info line so the choice is visible.
+
+Phase 10 also extracted three helpers from `armies/` and `battles/`
+into [verbs/shared/march_render.go](../../internal/tui/verbs/shared/march_render.go):
+`RegionNameMap`, `LookupRegionName`, `PathNames`, `PrintMarchOrder`.
+Three packages were maintaining duplicate `regionNameMap` copies;
+the move removes the duplication and lets the new sibling file in
+the parent `verbs` package reuse the printer without exporting
+across package boundaries.
+
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 
 Tiny shared printers — currently just `printProfileRead`,
@@ -451,6 +484,27 @@ The existing list of flagged candidates as of Phase 8:
   `ShowWorldMap` per world). For cross-world history — e.g. a
   player browsing an archived world they're no longer in —
   embedding `region_name` on `Battle` would close the gap.
+- Phase 10: no `march preview` endpoint (re-surfaced from Phase 8).
+  All three new wizards would benefit from a pre-flight call covering
+  reachability, capacity, and a win-probability hint vs the static
+  garrison. Without it, the only feedback for a doomed dispatch is
+  a lost battle in `battles` after the march arrives.
+- Phase 10: no "defending army at region X" indicator. `node attack`
+  can't tell the user walk-in vs PvP up front — the confirm subtitle
+  hedges with "may be contested". A `defenders` flag (or count) on
+  `Region` / `Node` would close the gap.
+- Phase 10: `MarchIntent.capture` overloads two backend services.
+  The same wire value `"capture"` triggers `Nodes::Capture` for
+  wilderness and `Nodes::Attack` for owned. The CLI exposes them as
+  two distinct sub-verbs (`node capture` vs `node attack`) but the
+  routed service is opaque on the `MarchOrder` response. Splitting
+  the intent (`capture_wilderness` / `attack_node`) or surfacing the
+  routed service on the response would let the CLI render the actual
+  outcome path.
+- Phase 10: `Node.OwnerKingdomID` is a ULID with no companion
+  `owner_handle`. `node attack` renders the owner as a raw ULID in
+  both the picker description and the preview block. Mirror of the
+  Phase 9 `attacker_handle` / `defender_handle` gap.
 
 Don't ship workarounds quietly.
 

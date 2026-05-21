@@ -297,12 +297,32 @@ kingdoms render as truncated ULIDs because there's no
 No new endpoints — composes Phase 6 (map/region/nodes/ruins) with
 Phase 8 (march dispatch with `capture` / `claim_ruin` intents).
 
-- [ ] Wilderness node capture wizard: requires Catapult; surfaces
-      `Nodes::Capture` / `Combat::ResolveGarrison` outcomes via the
-      battle stream
-- [ ] Owned node attack flow: `Nodes::Attack` (walk-in vs PvP)
-- [ ] Ruin claim flow: `Ruins::Claim`; surface the warehouse-capped
-      cache grant on success
+- [x] Wilderness node capture wizard: `node capture [<region>]`
+      dispatches a `capture`-intent march; outcomes surface via the
+      battle stream once the march arrives. Per user direction at plan
+      review, the CLI does **not** enforce the Catapult precondition
+      client-side — the confirm subtitle nudges, the backend remains
+      authoritative on the arrival-time defeat
+- [x] Owned node attack flow: `node attack [<region>]`; same wire
+      intent (`capture`), backend dispatches `Nodes::Attack` based on
+      the node's current owner. Walk-in vs PvP is opaque to the CLI —
+      the confirm subtitle hedges accordingly (backend co-evolution
+      candidate: a `defenders` indicator on `Region`)
+- [x] Ruin claim flow: `ruin claim [<region>]` dispatches a
+      `claim_ruin`-intent march; preview block calls out the §16.11
+      warehouse-cap warning ("anything over your Warehouse cap is
+      lost") before the confirm
+
+**Phase 10 also landed:** the `printMarchOrder`, `pathNames`, and
+`regionNameMap` / `lookupRegionName` helpers (previously duplicated in
+[internal/tui/verbs/armies/](internal/tui/verbs/armies/) and
+[internal/tui/verbs/battles/](internal/tui/verbs/battles/)) moved into
+[internal/tui/verbs/shared/march_render.go](internal/tui/verbs/shared/march_render.go)
+so [internal/tui/verbs/expeditions.go](internal/tui/verbs/expeditions.go)
+can reuse them without exporting them from a sibling subpackage. Sub-
+verb registrations live in [regions.go](internal/tui/verbs/regions.go)
+next to the existing `node show` / `ruins` declarations; a brand-new
+singular `ruin` parent verb hosts the `claim` sub.
 
 ## Phase 11 — Trade
 

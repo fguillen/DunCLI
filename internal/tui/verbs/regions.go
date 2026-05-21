@@ -62,8 +62,8 @@ func init() {
 
 	shell.Register(&shell.Verb{
 		Name:    "node",
-		Summary: "Inspect a node",
-		Usage:   "node show <id-or-region>",
+		Summary: "Inspect or act on a node",
+		Usage:   "node <show|capture|attack> ...",
 		Sub: map[string]*shell.Verb{
 			"show": {
 				Name:     "show",
@@ -71,6 +71,35 @@ func init() {
 				Usage:    "node show <id-or-region>",
 				Run:      runNodeShow,
 				Complete: shell.SuggestFunc(suggestRegionName),
+			},
+			"capture": {
+				Name:     "capture",
+				Summary:  "Dispatch a capture march against a wilderness node",
+				Usage:    "node capture [<region>]",
+				Run:      runNodeCapture,
+				Complete: shell.SuggestFunc(suggestCapturableRegions),
+			},
+			"attack": {
+				Name:     "attack",
+				Summary:  "Dispatch a capture march against a foreign-owned node",
+				Usage:    "node attack [<region>]",
+				Run:      runNodeAttack,
+				Complete: shell.SuggestFunc(suggestAttackableRegions),
+			},
+		},
+	})
+
+	shell.Register(&shell.Verb{
+		Name:    "ruin",
+		Summary: "Act on a ruin",
+		Usage:   "ruin claim [<region>]",
+		Sub: map[string]*shell.Verb{
+			"claim": {
+				Name:     "claim",
+				Summary:  "Dispatch a claim_ruin march against an unclaimed ruin",
+				Usage:    "ruin claim [<region>]",
+				Run:      runRuinClaim,
+				Complete: shell.SuggestFunc(suggestClaimableRegions),
 			},
 		},
 	})

@@ -120,6 +120,19 @@ via `init()` → `shell.Register`. Architecture chapter:
 | `battles [--limit N] [--offset N]` | `listKingdomBattles` | [battles/battles.go](../../internal/tui/verbs/battles/battles.go) | Newest-first table; opponent column is `(wilderness)` when `defender_kingdom_id` is empty, otherwise the *other* side's kingdom ID (handles caller-defended as well as caller-attacked). Region names come from the `ShowWorldMap` cache. Pagination via `--limit` (≤ 100) / `--offset`; total-count footer + "more" hint when more pages remain |
 | `battle show <id>` | `showBattle` | [battles/battles.go](../../internal/tui/verbs/battles/battles.go) | Header (region, when, outcome, titles, march, loot) + per-side participants (`(you)` marker on the caller) + verbose multi-line round log with optional `walls:` line. Tab completion lists IDs from the most recent battles page. 404 covers both unknown IDs and someone else's battles |
 
+### Phase 10 — Nodes & ruins capture flows
+
+All three verbs are guided wizards that compose `listNodes` /
+`listRuins` (target discovery) + `listKingdomArmies` (home-army
+picker) + `dispatchMarch` (action). No new endpoints; the actual
+outcome resolves at march arrival and surfaces through `battles`.
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `node capture [<region>]` | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | [expeditions.go](../../internal/tui/verbs/expeditions.go) | Eligible regions: wilderness nodes (no owner, not home-hoard). Preview shows the static garrison from `Node.Garrison`. **No client-side Catapult enforcement** — confirm subtitle nudges, backend is authoritative |
+| `node attack [<region>]` | `listNodes`, `listKingdomArmies`, `dispatchMarch` (intent=`capture`) | [expeditions.go](../../internal/tui/verbs/expeditions.go) | Eligible regions: nodes owned by another kingdom. Same wire intent as `node capture` — backend dispatches `Nodes::Attack` vs `Nodes::Capture` based on the node's current owner. Walk-in vs PvP is opaque to the CLI |
+| `ruin claim [<region>]` | `listRuins`, `listKingdomArmies`, `dispatchMarch` (intent=`claim_ruin`) | [expeditions.go](../../internal/tui/verbs/expeditions.go) | Eligible regions: any ruin with `Claimed == false`. Preview embeds the §16.11 "anything over your Warehouse cap is lost" warning |
+
 ---
 
 ## Phases not yet shipped
@@ -129,8 +142,6 @@ implemented. operationIds listed here for forward navigation; expect
 this section to migrate into the verb table above as each phase
 lands.
 
-- **Phase 10 — Nodes & ruins capture flows**: composes Phase 6 + Phase 8;
-  no new endpoints
 - **Phase 11 — Trade**: `dispatchCaravan`, `listTradeLedger`
 - **Phase 12 — Wonders**: `getWonder`, `startWonder`, `cancelWonder`,
   `repairWonder`, `payWonderMilestone`, `listWorldWonders`
