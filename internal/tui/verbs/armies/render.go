@@ -115,16 +115,3 @@ func printArmyList(sess *shell.Session, list []gen.Army, regionNameByID map[stri
 	}
 	shell.Section(sess.Out, "Armies:", strings.Join(lines, "\n"))
 }
-
-// printMarchOrder renders one dispatched / recalled march.
-func printMarchOrder(sess *shell.Session, m *gen.MarchOrder, pathNames []string) {
-	shell.Strong(sess.Out, fmt.Sprintf("march %s  (%s)", m.ID, string(m.Intent)))
-	_, _ = fmt.Fprintf(sess.Out, "  army:      %s\n", m.ArmyID)
-	_, _ = fmt.Fprintf(sess.Out, "  arrives:   %s  (ETA %s)\n",
-		m.ArrivesAt.Format("2006-01-02 15:04 MST"), shared.RelTime(m.ArrivesAt))
-	if len(pathNames) > 0 {
-		_, _ = fmt.Fprintf(sess.Out, "  path:      %s\n", strings.Join(pathNames, " → "))
-	} else if len(m.Path) > 0 {
-		_, _ = fmt.Fprintf(sess.Out, "  path:      %s\n", strings.Join(m.Path, " → "))
-	}
-}

@@ -75,7 +75,7 @@ func runArmiesList(ctx context.Context, sess *shell.Session, _ []string, _ map[s
 	if err != nil {
 		return err
 	}
-	regionNames := regionNameMap(ctx, sess)
+	regionNames := shared.RegionNameMap(ctx, sess)
 	printArmyList(sess, list, regionNames)
 	return nil
 }
@@ -98,7 +98,7 @@ func runArmyShow(ctx context.Context, sess *shell.Session, args []string, _ map[
 	if err != nil {
 		return err
 	}
-	printArmy(sess, a, lookupRegionName(ctx, sess, a.LocationRegionID))
+	printArmy(sess, a, shared.LookupRegionName(ctx, sess, a.LocationRegionID))
 	return nil
 }
 
@@ -291,32 +291,6 @@ func sortedKeys(c gen.Composition) []string {
 		}
 	}
 	return out
-}
-
-// regionNameMap resolves region ID → name for the in-scope world if
-// possible. Returns an empty map on any error (the caller falls back
-// to IDs without complaining).
-func regionNameMap(ctx context.Context, sess *shell.Session) map[string]string {
-	worldID, err := shared.RequireWorldID(ctx, sess)
-	if err != nil {
-		return map[string]string{}
-	}
-	regions, err := sess.API.ShowWorldMap(ctx, worldID)
-	if err != nil {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(regions))
-	for _, r := range regions {
-		out[r.ID] = r.Name
-	}
-	return out
-}
-
-func lookupRegionName(ctx context.Context, sess *shell.Session, regionID string) string {
-	if regionID == "" {
-		return ""
-	}
-	return regionNameMap(ctx, sess)[regionID]
 }
 
 // suggestArmyNames feeds tab completion for every `army <sub> <Tab>`

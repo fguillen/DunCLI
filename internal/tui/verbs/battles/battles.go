@@ -62,7 +62,7 @@ func runBattlesList(ctx context.Context, sess *shell.Session, _ []string, flags 
 	if err != nil {
 		return err
 	}
-	printBattleList(sess, battles, total, effectiveLimit(limit), offset, kingdomID, regionNameMap(ctx, sess))
+	printBattleList(sess, battles, total, effectiveLimit(limit), offset, kingdomID, shared.RegionNameMap(ctx, sess))
 	return nil
 }
 
@@ -80,7 +80,7 @@ func runBattleShow(ctx context.Context, sess *shell.Session, args []string, _ ma
 	if err != nil {
 		return err
 	}
-	printBattleDetail(sess, battle, parts, kingdomID, regionNameMap(ctx, sess))
+	printBattleDetail(sess, battle, parts, kingdomID, shared.RegionNameMap(ctx, sess))
 	return nil
 }
 
@@ -115,30 +115,6 @@ func effectiveLimit(requested int) int {
 		return 25
 	}
 	return requested
-}
-
-// regionNameMap resolves region ID → name for the in-scope world if
-// possible. Returns an empty map on any error (the caller falls back
-// to IDs without complaining). Mirrors armies/armies.go on purpose so
-// cross-world history just renders the raw region_id.
-//
-// Backend co-evolution candidate: embedding `region_name` on Battle
-// would close the gap for archived worlds the caller isn't in any
-// more.
-func regionNameMap(ctx context.Context, sess *shell.Session) map[string]string {
-	worldID, err := shared.RequireWorldID(ctx, sess)
-	if err != nil {
-		return map[string]string{}
-	}
-	regions, err := sess.API.ShowWorldMap(ctx, worldID)
-	if err != nil {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(regions))
-	for _, r := range regions {
-		out[r.ID] = r.Name
-	}
-	return out
 }
 
 // suggestBattleIDs feeds tab completion for `battle show <Tab>`. It

@@ -103,7 +103,7 @@ func runMarchDispatch(ctx context.Context, sess *shell.Session, args []string, _
 	if err != nil {
 		return err
 	}
-	printMarchOrder(sess, march, pathNames(ctx, sess, march.Path))
+	shared.PrintMarchOrder(sess, march, shared.PathNames(ctx, sess, march.Path))
 	return nil
 }
 
@@ -127,27 +127,11 @@ func runRecall(ctx context.Context, sess *shell.Session, args []string, _ map[st
 	}
 	shell.Success(sess.Out, fmt.Sprintf("recalled: army %s returning, arrives %s",
 		args[0], march.ArrivesAt.Format("2006-01-02 15:04 MST")))
-	printMarchOrder(sess, march, pathNames(ctx, sess, march.Path))
+	shared.PrintMarchOrder(sess, march, shared.PathNames(ctx, sess, march.Path))
 	return nil
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
-
-func pathNames(ctx context.Context, sess *shell.Session, path []string) []string {
-	if len(path) == 0 {
-		return nil
-	}
-	names := regionNameMap(ctx, sess)
-	out := make([]string, len(path))
-	for i, id := range path {
-		if n, ok := names[id]; ok {
-			out[i] = n
-		} else {
-			out[i] = id
-		}
-	}
-	return out
-}
 
 // suggestMarchArg0 completes the first positional arg — the army name.
 // It does not try to anticipate the region/intent positions because
