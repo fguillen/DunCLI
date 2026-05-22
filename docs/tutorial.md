@@ -332,7 +332,7 @@ The fix is `profile set` below.
 ### `profile set [--handle X] [--real-name "Y"]`
 
 Updates your handle and/or real name. The handle must match
-`^[A-Za-z0-9_-]{1,24}$` — letters, digits, underscore, hyphen, 1–24
+`^[A-Za-z0-9_-]{3,24}$` — letters, digits, underscore, hyphen, 3–24
 characters.
 
 **Flag-driven** (fast, scriptable):
@@ -355,7 +355,7 @@ dun> profile set
 Two fields appear:
 
 ```
-  Handle (1-24 chars, A-Z 0-9 _ -)
+  Handle (3-24 chars, A-Z 0-9 _ -)
   Real name (optional)
 ```
 
@@ -366,7 +366,7 @@ Bad handle (caught client-side before the request leaves):
 
 ```
 dun> profile set --handle "has spaces"
-error: handle must be 1-24 chars: letters, digits, underscore, hyphen
+error: handle must be 3-24 chars: letters, digits, underscore, hyphen
 ```
 
 Server-side handle lock (once the round starts):

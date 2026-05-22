@@ -293,7 +293,7 @@ which opens a `selector.Pick` over member servers when the player has
 | Verb | operationId | Notes |
 |---|---|---|
 | `profile show` | `showPlayerProfile` | Calls with caller's own handle pulled from `Context.KingdomHandle()`. If the handle isn't known yet, surfaces a clear "set one with `profile set --handle ...`" hint instead of an API call |
-| `profile set --handle X --real-name "Y"` | `updateOwnProfile` | No flags → open a `selector.Form`. Client-side regex check `^[A-Za-z0-9_-]{1,24}$` from §17.1 before the HTTP call to save a round-trip on obviously-bad input |
+| `profile set --handle X --real-name "Y"` | `updateOwnProfile` | No flags → open a `selector.Form`. Client-side regex check `^[A-Za-z0-9_-]{3,24}$` from §17.1 before the HTTP call to save a round-trip on obviously-bad input |
 
 `profile set` also updates `Context.KingdomHandle` on success so
 subsequent `profile show` and Phase 7 verbs can read it without

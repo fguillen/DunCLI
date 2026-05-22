@@ -29,7 +29,7 @@ func init() {
 				Usage:   "profile set [--handle X] [--real-name Y]",
 				Run:     runProfileSet,
 				Flags: []shell.FlagSpec{
-					{Name: "handle", HasValue: true, Help: "new player handle (alphanumeric / underscore / hyphen, 1-24 chars)"},
+					{Name: "handle", HasValue: true, Help: "new player handle (alphanumeric / underscore / hyphen, 3-24 chars)"},
 					{Name: "real-name", HasValue: true, Help: "new display real name"},
 				},
 			},
@@ -40,7 +40,7 @@ func init() {
 // handleSyntax is the client-side cheap check from §17.1. The
 // backend stays the source of truth; this only catches obviously
 // wrong input before we burn a request.
-var handleSyntax = regexp.MustCompile(`^[A-Za-z0-9_-]{1,24}$`)
+var handleSyntax = regexp.MustCompile(`^[A-Za-z0-9_-]{3,24}$`)
 
 // runProfileShow implements `profile show` — uses the existing
 // ShowPlayerProfile endpoint scoped to the in-context server, with
@@ -85,7 +85,7 @@ func runProfileSet(ctx context.Context, sess *shell.Session, _ []string, flags m
 	if !hasHandle && !hasReal {
 		// No flags → open a huh form.
 		res, err := selector.Form(ctx, "Update profile", []selector.Field{
-			{Key: "handle", Label: "Handle (1-24 chars, A-Z 0-9 _ -)", Initial: sess.Context.KingdomHandle(), Validate: validateHandle},
+			{Key: "handle", Label: "Handle (3-24 chars, A-Z 0-9 _ -)", Initial: sess.Context.KingdomHandle(), Validate: validateHandle},
 			{Key: "real_name", Label: "Real name (optional)"},
 		})
 		if err != nil {
@@ -140,7 +140,7 @@ func runProfileSet(ctx context.Context, sess *shell.Session, _ []string, flags m
 // bad handle does not consume an HTTP round-trip.
 func validateHandle(in string) error {
 	if !handleSyntax.MatchString(in) {
-		return errors.New("handle must be 1-24 chars: letters, digits, underscore, hyphen")
+		return errors.New("handle must be 3-24 chars: letters, digits, underscore, hyphen")
 	}
 	return nil
 }
