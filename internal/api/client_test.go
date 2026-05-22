@@ -204,13 +204,19 @@ func TestClient_health_envelopeDecoded(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Phase-1 sanity: the SecuritySource adapter rejects admin operations
-// so an accidental admin call surfaces loudly instead of silently
-// sending an empty token.
-func TestSecurity_adminBearerRejected(t *testing.T) {
+// Both security seams delegate to the TokenProvider — the active scope
+// is decided by which provider the *Client was built with (player vs
+// admin), not by which seam ogen happens to call.
+func TestSecurity_bothBearersDelegateToProvider(t *testing.T) {
 	src := bearerSource{tp: StaticToken("x")}
-	_, err := src.AdminBearer(context.Background(), "anything")
-	require.Error(t, err)
+
+	pb, err := src.PlayerBearer(context.Background(), "anything")
+	require.NoError(t, err)
+	require.Equal(t, "x", pb.Token)
+
+	ab, err := src.AdminBearer(context.Background(), "anything")
+	require.NoError(t, err)
+	require.Equal(t, "x", ab.Token)
 }
 
 // fromEnvelope is exercised indirectly by the 429 path; this unit-level

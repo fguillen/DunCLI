@@ -7,28 +7,29 @@ import (
 	"github.com/fguillen/dun-cli/internal/tui/theme"
 )
 
-// registerBuiltins is called by Run() before the prompt loop. The
-// built-in verbs are simple enough that they live here rather than in
-// internal/tui/verbs/* — they have no API dependencies and are part
-// of the shell's contract regardless of which game verbs are linked.
-func registerBuiltins(version string) {
-	Register(&Verb{
+// registerBuiltins is called by Run() before the prompt loop, against
+// whichever registry the active mode uses. The built-in verbs are
+// simple enough that they live here rather than in internal/tui/verbs/*
+// — they have no API dependencies and are part of the shell's contract
+// regardless of which game verbs are linked, in either shell surface.
+func registerBuiltins(reg *registry, version string) {
+	reg.add(&Verb{
 		Name:    "help",
 		Summary: "List commands, or print usage for one (`help <verb>`)",
 		Usage:   "help [verb]",
 		Run:     runHelp,
-		Complete: SuggestFunc(func(_ context.Context, _ *Session, _ string) ([]string, error) {
-			return verbNames(), nil
+		Complete: SuggestFunc(func(_ context.Context, sess *Session, _ string) ([]string, error) {
+			return verbNamesFor(sess.registry()), nil
 		}),
 	})
 
 	exitFn := func(_ context.Context, _ *Session, _ []string, _ map[string]string) error {
 		return ErrExit
 	}
-	Register(&Verb{Name: "quit", Summary: "Exit the shell", Run: exitFn})
-	Register(&Verb{Name: "exit", Summary: "Exit the shell", Run: exitFn})
+	reg.add(&Verb{Name: "quit", Summary: "Exit the shell", Run: exitFn})
+	reg.add(&Verb{Name: "exit", Summary: "Exit the shell", Run: exitFn})
 
-	Register(&Verb{
+	reg.add(&Verb{
 		Name:    "clear",
 		Summary: "Clear the screen",
 		Run: func(_ context.Context, sess *Session, _ []string, _ map[string]string) error {
@@ -38,7 +39,7 @@ func registerBuiltins(version string) {
 		},
 	})
 
-	Register(&Verb{
+	reg.add(&Verb{
 		Name:    "version",
 		Summary: "Print the dun CLI version",
 		Run: func(_ context.Context, sess *Session, _ []string, _ map[string]string) error {
@@ -47,7 +48,7 @@ func registerBuiltins(version string) {
 		},
 	})
 
-	Register(&Verb{
+	reg.add(&Verb{
 		Name:    "whoami",
 		Summary: "Show the active credential",
 		Run: func(_ context.Context, sess *Session, _ []string, _ map[string]string) error {
@@ -58,9 +59,9 @@ func registerBuiltins(version string) {
 		},
 	})
 
-	Register(&Verb{
+	reg.add(&Verb{
 		Name:    "where",
-		Summary: "Show the active (server, world, kingdom) scope",
+		Summary: "Show the active scope",
 		Run: func(_ context.Context, sess *Session, _ []string, _ map[string]string) error {
 			c := sess.Context
 			st := theme.Active()
@@ -74,16 +75,22 @@ func registerBuiltins(version string) {
 			}
 			line("server", c.ServerSlug())
 			line("world", c.WorldSlug())
-			line("kingdom", c.KingdomHandle())
+			// Admins manage servers and worlds but never hold a kingdom,
+			// so the kingdom line is player-only.
+			if sess.Mode != ModeAdmin {
+				line("kingdom", c.KingdomHandle())
+			}
 			return nil
 		},
 	})
 }
 
-// runHelp implements the `help` verb.
+// runHelp implements the `help` verb. It draws verbs from the session's
+// own registry so the admin shell lists admin verbs.
 func runHelp(_ context.Context, sess *Session, args []string, _ map[string]string) error {
+	reg := sess.registry()
 	if len(args) == 0 {
-		verbs := Verbs()
+		verbs := reg.list()
 		_, _ = fmt.Fprintln(sess.Out, theme.Active().Strong.Render("commands:"))
 		_, _ = fmt.Fprint(sess.Out, helpFormat(verbs))
 		_, _ = fmt.Fprintln(sess.Out)
@@ -91,7 +98,7 @@ func runHelp(_ context.Context, sess *Session, args []string, _ map[string]strin
 			"Tab completes verbs, slugs, and flags. Ctrl-D exits."))
 		return nil
 	}
-	v, ok := Resolve(args[0])
+	v, ok := reg.resolve(args[0])
 	if !ok {
 		return fmt.Errorf("no such verb: %s", args[0])
 	}

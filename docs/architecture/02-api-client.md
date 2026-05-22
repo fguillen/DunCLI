@@ -169,19 +169,29 @@ func (s bearerSource) PlayerBearer(ctx, _ gen.OperationName) (gen.PlayerBearer, 
 ```
 
 The Phase 2 [auth.FileProvider](../../internal/auth/provider.go) is
-backed by an `*auth.Store` that re-reads `Current` on every `Token()`
-call. That is what lets `dun login` mutate the credentials file and
-then immediately hand off to the shell without rebuilding the
-`*api.Client` — the next outbound request picks up the fresh key.
+backed by an `*auth.Store` that re-reads its scope's current pointer
+on every `Token()` call. That is what lets `dun login` mutate the
+credentials file and then immediately hand off to the shell without
+rebuilding the `*api.Client` — the next outbound request picks up the
+fresh key.
 
 Returning `("", nil)` from `Token` is **valid**, per the doc comment
 on the interface. It means "no credentials available"; the backend
 will respond with 401 and the caller can handle that as an
 unauthenticated state.
 
-`AdminBearer` returns an error: v1 is player-surface only, and we want
-to fail loudly if a future spec change ever routes us through an admin
-operation.
+### The two bearer seams
+
+`bearerSource` has two methods — `PlayerBearer` and `AdminBearer` —
+because the OpenAPI spec declares two security schemes. Both delegate
+identically to `tp.Token(ctx)`. The active scope is decided **by which
+`TokenProvider` the `*Client` was built with**, not by which seam ogen
+calls: `loadSession()` builds a player client (`auth.NewFileProvider`),
+`loadAdminSession()` an admin client (`auth.NewAdminFileProvider`).
+A given process runs one shell, so a client only ever issues
+operations of one scope. (Before Phase 14, `AdminBearer` returned a
+hard error — admin was out of scope for v1; that guard is gone now
+that the admin track has landed.)
 
 ---
 
@@ -293,8 +303,19 @@ type resolverCache struct {
     regions  map[string]map[string]string // worldID → name → ULID
     armies   map[string]map[string]string // kingdomID → name → ULID
     kingdoms map[string]string            // worldID → caller's kingdom ULID
+
+    adminServers map[string]string            // slug → ULID  (admin scope)
+    adminWorlds  map[string]map[string]string // serverID → slug → ULID
 }
 ```
+
+The `admin*` slices are kept separate from the player ones because the
+admin surface is a different listing — servers the caller
+*administers*, not servers the caller can *join* — so the two
+namespaces must never alias even for an identical slug.
+`ResolveAdminServer` / `ResolveAdminWorld` (Phase 14) follow the exact
+pattern below, backed by `ListAdminServers` / `ListAdminWorlds`; they
+back the Phase 15+ admin verbs.
 
 Each `Resolve<Entity>` method:
 
@@ -335,6 +356,7 @@ success**:
 | `QueueTrainingOrder`, `CancelTrainingOrder` | `InvalidateKingdom(kingdomID)` — training deducts stockpile so the next `kingdom` must refetch |
 | `SplitArmy`, `RenameArmy`, `MergeArmy` | `InvalidateArmies(kingdomID)` — composition / membership of the armies list changed |
 | `DispatchMarch`, `RecallMarch` | (no cache invalidation in v1) — `Army.status` is the only client-visible field that changes and the CLI always fetches fresh via `ListKingdomArmies` |
+| (Phase 15+ admin mutations) | `InvalidateAdminServers()` / `InvalidateAdminWorlds(serverID)` — wired in Phase 14, consumed by the admin server/world verbs |
 
 The hooks are wired even when they are no-ops (`InvalidateKingdom`
 today) so callers don't need to remember to add them when a later

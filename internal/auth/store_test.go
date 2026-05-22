@@ -104,7 +104,7 @@ func TestStore_Delete_clearsCurrentIfMatches(t *testing.T) {
 	s.Upsert(c)
 	require.NoError(t, s.SetCurrent(c.BaseURL, c.Email))
 
-	s.Delete(c.BaseURL, c.Email)
+	s.Delete(c.BaseURL, c.Email, ScopePlayer)
 	require.Empty(t, s.Credentials)
 	_, ok := s.CurrentCredential()
 	require.False(t, ok)
@@ -119,7 +119,7 @@ func TestStore_Delete_keepsCurrentWhenDifferent(t *testing.T) {
 	s.Upsert(other)
 	require.NoError(t, s.SetCurrent(c.BaseURL, c.Email))
 
-	s.Delete(other.BaseURL, other.Email)
+	s.Delete(other.BaseURL, other.Email, ScopePlayer)
 
 	require.Len(t, s.Credentials, 1)
 	got, ok := s.CurrentCredential()
@@ -137,6 +137,107 @@ func TestStore_Clear_wipesEverything(t *testing.T) {
 	require.Empty(t, s.Credentials)
 	_, ok := s.CurrentCredential()
 	require.False(t, ok)
+}
+
+// sampleAdminCredential is the admin-scope sibling of sampleCredential
+// — same (base_url, email), distinct scope.
+func sampleAdminCredential(t *testing.T) Credential {
+	t.Helper()
+	c := sampleCredential(t)
+	c.APIKey = "raw-key-admin"
+	c.Scope = ScopeAdmin
+	return c
+}
+
+func TestStore_playerAndAdminCredentialsCoexist(t *testing.T) {
+	s := &Store{}
+	player := sampleCredential(t)
+	admin := sampleAdminCredential(t)
+	s.Upsert(player)
+	s.Upsert(admin)
+
+	// Same (base_url, email) but distinct scopes — two entries, no clobber.
+	require.Len(t, s.Credentials, 2)
+
+	gotP, ok := s.Get(player.BaseURL, player.Email, ScopePlayer)
+	require.True(t, ok)
+	require.Equal(t, "raw-key-abc", gotP.APIKey)
+
+	gotA, ok := s.Get(admin.BaseURL, admin.Email, ScopeAdmin)
+	require.True(t, ok)
+	require.Equal(t, "raw-key-admin", gotA.APIKey)
+}
+
+func TestStore_emptyScopeNormalizesToPlayer(t *testing.T) {
+	s := &Store{}
+	c := sampleCredential(t) // Scope left empty
+	s.Upsert(c)
+
+	got, ok := s.Get(c.BaseURL, c.Email, ScopePlayer)
+	require.True(t, ok, "an empty scope must be reachable as a player credential")
+	require.Equal(t, c.APIKey, got.APIKey)
+
+	_, ok = s.Get(c.BaseURL, c.Email, ScopeAdmin)
+	require.False(t, ok, "an empty scope must not match the admin scope")
+}
+
+func TestStore_currentAdminPointer_independentOfPlayer(t *testing.T) {
+	s := &Store{}
+	s.Upsert(sampleCredential(t))
+	s.Upsert(sampleAdminCredential(t))
+	require.NoError(t, s.SetCurrent("http://localhost:3000/v1", "alice@example.com"))
+	require.NoError(t, s.SetCurrentAdmin("http://localhost:3000/v1", "alice@example.com"))
+
+	p, ok := s.CurrentCredential()
+	require.True(t, ok)
+	require.Equal(t, "raw-key-abc", p.APIKey)
+
+	a, ok := s.CurrentAdminCredential()
+	require.True(t, ok)
+	require.Equal(t, "raw-key-admin", a.APIKey)
+}
+
+func TestStore_SetCurrentAdmin_rejectsPlayerOnlyEmail(t *testing.T) {
+	s := &Store{}
+	s.Upsert(sampleCredential(t)) // player only
+	err := s.SetCurrentAdmin("http://localhost:3000/v1", "alice@example.com")
+	require.Error(t, err, "SetCurrentAdmin must require an admin-scope credential")
+}
+
+func TestStore_Delete_scopedToOneSurface(t *testing.T) {
+	s := &Store{}
+	s.Upsert(sampleCredential(t))
+	s.Upsert(sampleAdminCredential(t))
+	require.NoError(t, s.SetCurrent("http://localhost:3000/v1", "alice@example.com"))
+	require.NoError(t, s.SetCurrentAdmin("http://localhost:3000/v1", "alice@example.com"))
+
+	// Deleting the admin entry leaves the player entry + pointer intact.
+	s.Delete("http://localhost:3000/v1", "alice@example.com", ScopeAdmin)
+	require.Len(t, s.Credentials, 1)
+	_, ok := s.CurrentCredential()
+	require.True(t, ok, "player [current] must survive an admin delete")
+	_, ok = s.CurrentAdminCredential()
+	require.False(t, ok, "admin [current_admin] must be cleared by the admin delete")
+}
+
+func TestStore_scope_roundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	s := &Store{}
+	s.Upsert(sampleCredential(t))
+	s.Upsert(sampleAdminCredential(t))
+	require.NoError(t, s.SetCurrentAdmin("http://localhost:3000/v1", "alice@example.com"))
+	require.NoError(t, s.Save())
+
+	loaded, err := LoadStore()
+	require.NoError(t, err)
+	require.Len(t, loaded.Credentials, 2)
+
+	got, ok := loaded.CurrentAdminCredential()
+	require.True(t, ok)
+	require.Equal(t, ScopeAdmin, got.Scope)
+	require.Equal(t, "raw-key-admin", got.APIKey)
 }
 
 func TestLoadStore_malformedFile_returnsError(t *testing.T) {
@@ -161,7 +262,7 @@ func TestStore_Save_overwritesExisting(t *testing.T) {
 
 	s2, err := LoadStore()
 	require.NoError(t, err)
-	s2.Delete("http://localhost:3000/v1", "alice@example.com")
+	s2.Delete("http://localhost:3000/v1", "alice@example.com", ScopePlayer)
 	require.NoError(t, s2.Save())
 
 	s3, err := LoadStore()

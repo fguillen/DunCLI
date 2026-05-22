@@ -14,13 +14,15 @@ the file.
 ## Shape
 
 ```
-shell.Run(ctx, baseURL, email, *api.Client, Options)
+shell.Run(ctx, baseURL, email, *api.Client, Options{Mode})
   │
-  ├─► build Session{ API, Cfg, Creds, Context, Out, State }
-  ├─► register built-in verbs (help, quit, exit, clear, version, whoami, where)
+  ├─► build Session{ API, Cfg, Creds, Context, Out, Mode, State }
+  │     State = state.json (player) | admin-state.json (admin)
+  ├─► register built-in verbs into this mode's registry
+  │     (help, quit, exit, clear, version, whoami, where)
   ├─► API.Health(ctx)            (connectivity probe; fail-loud)
   ├─► postLoginPicker hook        (optional, only after `dun login` w/ ≥2 servers)
-  ├─► newReadline(sess)           (history at ~/.dun/history, completer wired)
+  ├─► newReadline(sess, prompt)   (prompt = "dun> " | "dun-admin> ")
   └─► for {                       prompt loop
         line := rl.Readline()
         Dispatch(ctx, sess, line) → leaf Verb.Run → render to scrollback
@@ -63,26 +65,48 @@ type Handler func(ctx, sess, args, flags) error
 `Verb.IsLeaf()` reports whether `Run` is non-nil. A non-leaf Verb
 delegates via `Sub` — `server` is a branch, `server.join` is a leaf.
 
-### Package-level registry
+### Two registries — the mode discriminator
+
+The shell engine serves two surfaces: the player `dun>` shell and the
+admin `dun-admin>` shell (Phase 14). They share *everything* — the
+dispatcher, completion engine, selector primitives, theme, readline —
+and differ only in which **verb registry** they draw from.
 
 ```go
-var defaultRegistry = &registry{verbs: map[string]*Verb{}}
+type Mode int
+const ( ModePlayer Mode = iota; ModeAdmin )   // ModePlayer is the zero value
 
-func Register(v *Verb)       // panic on duplicate name
-func Resolve(name string)    (*Verb, bool)
-func Verbs() []*Verb         // every top-level verb, sorted
+var (
+    defaultRegistry = &registry{verbs: map[string]*Verb{}}  // player
+    adminRegistry   = &registry{verbs: map[string]*Verb{}}  // admin
+)
+
+func Register(v *Verb)        // → player registry
+func RegisterAdmin(v *Verb)   // → admin registry
+func Resolve(name string)      (*Verb, bool)  // player
+func ResolveAdmin(name string) (*Verb, bool)  // admin
+func Verbs() []*Verb                          // player, sorted
 ```
 
 Init order does not matter: every file under
 [internal/tui/verbs/](../../internal/tui/verbs/) calls
-`shell.Register(...)` from `init()`, and `cmd/dun/main.go` brings them
-all in with a blank `_ "…/verbs"` import. By the time `shell.Run`
-reads the registry, every verb is present.
+`shell.Register(...)` from `init()`, every file under
+[internal/tui/verbs/admin/](../../internal/tui/verbs/admin/) calls
+`shell.RegisterAdmin(...)`, and `cmd/dun/main.go` brings them all in
+with blank imports. By the time `shell.Run` reads its registry, every
+verb is present.
 
 `Register` panics on duplicate — that's a programming bug (two files
 registering the same name), never a runtime condition. Aliases like
 `quit` / `exit` are intentionally registered as two distinct verbs
 that share a Handler closure.
+
+`Session.Mode` (set by `shell.Run` from `Options.Mode`) picks the
+registry via `registryForMode`. `Dispatch`, the completion engine and
+the `help` built-in all resolve against `sess.registry()`, so a verb
+registered for one surface is simply invisible to the other — there is
+no leakage and no per-verb filtering. A process runs one shell or the
+other, never both; `dun` is `ModePlayer`, `dun admin` is `ModeAdmin`.
 
 ### Why a registry, not direct imports?
 
@@ -280,6 +304,13 @@ shell startup.
 The file is written atomically: temp file in the same dir, mode 0644,
 then `os.Rename`. Same pattern as `auth.Store.Save`.
 
+The admin shell uses a sibling file, `~/.dun/admin-state.json`
+(`NewAdminFileStore` vs `NewFileStore`; `shell.Run` picks one by
+`Mode`). Same `stateFile` shape — admins use `ServerSlug` /
+`WorldSlug` and never set `KingdomHandle`, so `kingdom_handle` simply
+never appears in `admin-state.json`. Two files means the `dun>` and
+`dun-admin>` scopes can't overwrite each other.
+
 ### When `Save` runs
 
 - On every successful `Dispatch` in `shell.Run` — line 130 of
@@ -323,6 +354,7 @@ type Session struct {
     Creds   CredentialSnapshot   // { Email string }
     Context *Context
     Out     io.Writer            // os.Stdout in prod; *bytes.Buffer in tests
+    Mode    Mode                 // ModePlayer / ModeAdmin
     State   StateStore
 }
 ```
@@ -336,6 +368,8 @@ Every verb handler receives a `*Session`. The intent is:
 - `sess.Context` is the mutable scope.
 - `sess.Out` is the rendering destination — never `os.Stdout`
   directly. Tests inject a `*bytes.Buffer`.
+- `sess.Mode` is the REPL surface; `sess.registry()` derives the verb
+  registry from it.
 - `sess.State` is the persistence interface.
 
 ---
@@ -353,12 +387,16 @@ contract regardless of which game verbs are linked:
 | `clear` | ANSI clear (`\033[H\033[2J`) |
 | `version` | Prints the `Options.Version` string |
 | `whoami` | Prints the active credential's email + base URL |
-| `where` | Prints the active (server, world, kingdom) scope |
+| `where` | Prints the active scope (kingdom line is player-only) |
 
 `whoami` and `where` are deliberately built-ins rather than game
 verbs: they read from `sess.Creds` / `sess.Context`, no HTTP call, no
 API client dependency. They live here so the shell remains usable
-even if the verbs package is empty.
+even if the verbs package is empty. The built-ins register into
+**both** surfaces — `registerBuiltins(reg, version)` takes the target
+registry, and `shell.Run` calls it for whichever mode it is running.
+`where` reads `sess.Mode` to drop the `kingdom` line in the admin
+shell (admins manage servers and worlds but never hold a kingdom).
 
 The `join` verb is registered by the verbs package, not built-in,
 because its sugar form (`join world <slug>`) calls into a game verb.
@@ -366,14 +404,12 @@ because its sugar form (`join world <slug>`) calls into a game verb.
 ### Idempotent registration
 
 ```go
-var builtinsRegistered bool
-func registerBuiltinsOnce(version string) { ... }
+func registerBuiltinsOnce(reg *registry, version string) { ... }
 ```
 
-A test that invokes `shell.Run` multiple times in-process would
-otherwise trip the duplicate-name panic in `Register`. The guard
-makes the shell test-friendly without weakening the registration
-contract.
+The guard is a `builtinsRegistered bool` **on each `registry`**, so a
+test that invokes `shell.Run` multiple times in-process — for either
+mode — doesn't trip the duplicate-name panic in `registry.add`.
 
 ---
 
@@ -441,6 +477,10 @@ let the verbs package set it from `init`.
   to keep the test deterministic.
 - **State** — [state_test.go](../../internal/tui/shell/state_test.go)
   exercises the round-trip and the foreign-credential isolation rule.
+- **Mode** — [mode_test.go](../../internal/tui/shell/mode_test.go)
+  covers player/admin registry isolation, mode-scoped `Dispatch`, the
+  per-registry builtins guard, `where` dropping the kingdom line in
+  admin mode, and the separate `admin-state.json` file.
 
 The teatest snapshot tests for the readline prompt itself are
 deferred (see [TODO.md](../../TODO.md) "Phase 3 — Interactive shell"

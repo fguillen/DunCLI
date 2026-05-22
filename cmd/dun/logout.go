@@ -7,6 +7,8 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
+
+	"github.com/fguillen/dun-cli/internal/auth"
 )
 
 func newLogoutCmd() *cobra.Command {
@@ -53,7 +55,7 @@ func runLogout(ctx context.Context, out io.Writer) error {
 	}
 
 	// Only delete the local entry after the server-side revoke succeeds.
-	sess.store.Delete(cur.BaseURL, cur.Email)
+	sess.store.Delete(cur.BaseURL, cur.Email, auth.ScopePlayer)
 	if err := sess.store.Save(); err != nil {
 		return fmt.Errorf("save credentials: %w", err)
 	}

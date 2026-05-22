@@ -457,39 +457,54 @@ parallel `dun-admin>` REPL, admin-scope credential storage, and the
 admin entity resolvers that Phases 15–18 consume. Mirrors the Phase
 2 / Phase 3 architecture for the player surface.
 
-- [ ] `dun admin` cobra subcommand: enters a dedicated `dun-admin>`
-      REPL. No alt-screen; scrollback preserved. Either a sibling
-      `internal/tui/adminshell/` package or a `mode` discriminator
-      threaded through `internal/tui/` — picked at implementation
-      time so the shell scaffolding (dispatcher, completion engine,
-      selector / form primitives) is reused, not forked
-- [ ] `dun admin login` — `requestAdminMagicLink` →
-      `exchangePlayerMagicLink`-style token prompt →
-      `exchangeAdminMagicLink`; persists key to `~/.dun/credentials`
-      with a new `scope = "admin"` field so player and admin entries
-      keyed on the same `(base_url, email)` coexist without clobber
-- [ ] `dun admin logout` — `revokeAdminApiKey` for the current key,
+- [x] `dun admin` cobra subcommand: enters a dedicated `dun-admin>`
+      REPL. No alt-screen; scrollback preserved. Implemented via a
+      `shell.Mode` discriminator threaded through `internal/tui/shell`
+      — one shell engine, two verb registries (`defaultRegistry` /
+      `adminRegistry`); the dispatcher, completion engine and selector
+      primitives are reused, not forked
+- [x] `dun admin login` — `requestAdminMagicLink` → token prompt →
+      `exchangeAdminMagicLink`; validates the response owner type is
+      `admin`; persists key to `~/.dun/credentials` with a new
+      `scope = "admin"` field so player and admin entries keyed on the
+      same `(base_url, email)` coexist without clobber
+- [x] `dun admin logout` — `revokeAdminApiKey` for the current key,
       removes the admin entry from `~/.dun/credentials`
-- [ ] `keys list` / `keys revoke <id>` inside the admin shell —
+- [x] `keys list` / `keys revoke <id>` inside the admin shell —
       `listAdminApiKeys` / `revokeAdminApiKey`
-- [ ] Built-ins reused from the player shell: `help [verb]`,
+- [x] Built-ins reused from the player shell: `help [verb]`,
       `quit` / `exit`, `clear`, `version`, `whoami`, `where`
-- [ ] Connectivity probe: `getHealth` once on shell start; same
+      (`where` drops the kingdom line in admin mode)
+- [x] Connectivity probe: `getHealth` once on shell start; same
       `backend unreachable: …` rendering as the player shell
-- [ ] Session context: in-scope `(admin server, admin world)`
+- [x] Session context: in-scope `(admin server, admin world)`
       persisted to a sibling `~/.dun/admin-state.json` (separate
       file from `~/.dun/state.json` so player and admin contexts
       can't overwrite each other); reloaded on shell start with
       foreign-credential entries ignored
-- [ ] Admin resolvers in `internal/api`: `ResolveAdminServer(slug)`,
-      `ResolveAdminWorld(slug)` with per-session memoization +
-      `InvalidateAdminServers` / `InvalidateAdminWorlds` hooks.
+- [x] Admin resolvers in `internal/api`: `ResolveAdminServer(slug)`,
+      `ResolveAdminWorld(serverID, slug)` with per-session memoization
+      + `InvalidateAdminServers` / `InvalidateAdminWorlds` hooks.
       Reuse the existing `gen.Client` — scope is selected by the
       bearer token, not by a separate client instance
-- [ ] Tests: stubbed backend covering admin magic-link round-trip,
+- [x] Tests: stubbed backend covering admin magic-link round-trip,
       `~/.dun/credentials` round-trip with the new `scope` key
       (including coexisting player+admin entries for the same
       email), and `dun admin` vs `dun` shell isolation on startup
+
+**Phase 14 also landed:** the shell `Mode` discriminator — `Run`
+selects the verb registry (`registryForMode`), the prompt string
+(`dun>` / `dun-admin>`) and the state file (`state.json` /
+`admin-state.json`) by mode. `internal/tui/shell.Register` /
+`RegisterAdmin` (and the test-only `Resolve` / `ResolveAdmin`) are the
+two registration seams. `internal/api.AdminBearer` flipped from a hard
+v1 error to delegating to the `TokenProvider`, mirroring
+`PlayerBearer`; `internal/auth.NewAdminFileProvider` is the admin-scope
+provider. Admin verbs live in the new
+[internal/tui/verbs/admin/](internal/tui/verbs/admin/) subpackage
+(Phase 14 ships only `keys`; Phases 15–18 add the rest). No backend
+co-evolution candidates surfaced — the four admin-auth operations
+mirror their player counterparts cleanly.
 
 ## Phase 15 — Admin server CRUD
 

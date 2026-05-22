@@ -19,10 +19,23 @@ type session struct {
 }
 
 // loadSession reads ~/.dun/config.toml + ~/.dun/credentials and builds
-// an api.Client. The Client uses a FileProvider so any in-process
-// mutation of store.Current is picked up on the next API call without
-// needing to rebuild the Client.
+// an api.Client for the player surface. The Client uses a FileProvider
+// so any in-process mutation of store.Current is picked up on the next
+// API call without needing to rebuild the Client.
 func loadSession() (*session, error) {
+	return loadSessionWith(auth.NewFileProvider)
+}
+
+// loadAdminSession is loadSession for the admin surface: the api.Client
+// is built with an admin FileProvider, so its bearer token is the
+// credential pointed at by [current_admin].
+func loadAdminSession() (*session, error) {
+	return loadSessionWith(auth.NewAdminFileProvider)
+}
+
+// loadSessionWith builds a session whose api.Client uses the
+// TokenProvider produced by newProvider (player vs admin scope).
+func loadSessionWith(newProvider func(*auth.Store) *auth.FileProvider) (*session, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -31,7 +44,7 @@ func loadSession() (*session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load credentials: %w", err)
 	}
-	client, err := api.New(cfg.BaseURL, auth.NewFileProvider(store), &http.Client{})
+	client, err := api.New(cfg.BaseURL, newProvider(store), &http.Client{})
 	if err != nil {
 		return nil, fmt.Errorf("build api client: %w", err)
 	}

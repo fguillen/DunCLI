@@ -66,16 +66,17 @@ func (c *completer) Do(line []rune, pos int) ([][]rune, int) {
 //   - endsWithSpace: true when the cursor is after a separator and a
 //     fresh slot is open.
 func (c *completer) suggest(prior []string, curWord string, endsWithSpace bool) []string {
+	reg := c.sess.registry()
 	// At the very start of a line: complete verbs.
 	if len(prior) == 0 && !endsWithSpace {
-		return verbNames()
+		return verbNamesFor(reg)
 	}
 	if len(prior) == 0 && endsWithSpace {
-		return verbNames()
+		return verbNamesFor(reg)
 	}
 
 	// Resolve verb / subverb path.
-	root, ok := Resolve(prior[0])
+	root, ok := reg.resolve(prior[0])
 	if !ok {
 		return nil
 	}
@@ -142,9 +143,10 @@ func runSuggester(sess *Session, s Suggester, prefix string) []string {
 	return out
 }
 
-// verbNames returns every top-level verb's name, sorted.
-func verbNames() []string {
-	verbs := Verbs()
+// verbNamesFor returns every top-level verb's name in the registry,
+// sorted.
+func verbNamesFor(reg *registry) []string {
+	verbs := reg.list()
 	out := make([]string, 0, len(verbs))
 	for _, v := range verbs {
 		out = append(out, v.Name)

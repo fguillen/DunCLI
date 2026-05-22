@@ -27,16 +27,25 @@ type resolverCache struct {
 	regions  map[string]map[string]string // worldID → name → ULID
 	armies   map[string]map[string]string // kingdomID → name → ULID
 	kingdoms map[string]string            // worldID → caller's kingdom ULID
+
+	// Admin-scope caches. Kept separate from the player ones above
+	// because the admin surface is a different listing (servers the
+	// caller administers, not servers the caller can join) — the two
+	// namespaces must never alias even for the same slug.
+	adminServers map[string]string            // slug → ULID
+	adminWorlds  map[string]map[string]string // serverID → slug → ULID
 }
 
 func newResolverCache() *resolverCache {
 	return &resolverCache{
-		servers:  map[string]string{},
-		worlds:   map[string]map[string]string{},
-		players:  map[string]map[string]string{},
-		regions:  map[string]map[string]string{},
-		armies:   map[string]map[string]string{},
-		kingdoms: map[string]string{},
+		servers:      map[string]string{},
+		worlds:       map[string]map[string]string{},
+		players:      map[string]map[string]string{},
+		regions:      map[string]map[string]string{},
+		armies:       map[string]map[string]string{},
+		kingdoms:     map[string]string{},
+		adminServers: map[string]string{},
+		adminWorlds:  map[string]map[string]string{},
 	}
 }
 
@@ -265,3 +274,85 @@ func (c *Client) InvalidateArmies(kingdomID string) {
 // this is a no-op today, but the hook is wired so callers don't need
 // to remember to add it when later phases extend the kingdom cache.
 func (c *Client) InvalidateKingdom(_ string) {}
+
+// ── Admin-scope resolvers ─────────────────────────────────────────────
+//
+// Mirrors of ResolveServer / ResolveWorld for the admin surface. They
+// back the Phase 15+ admin verbs; Phase 14 wires them so later phases
+// resolve admin server/world slugs the same way the player shell
+// resolves their counterparts.
+
+// ResolveAdminServer maps a server slug to its ULID. On miss it calls
+// listAdminServers and walks the result.
+func (c *Client) ResolveAdminServer(ctx context.Context, slug string) (string, error) {
+	c.cache.mu.RLock()
+	if id, ok := c.cache.adminServers[slug]; ok {
+		c.cache.mu.RUnlock()
+		return id, nil
+	}
+	c.cache.mu.RUnlock()
+
+	servers, err := c.ListAdminServers(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	for _, s := range servers {
+		c.cache.adminServers[s.Slug] = s.ID
+	}
+	if id, ok := c.cache.adminServers[slug]; ok {
+		return id, nil
+	}
+	return "", notFound("server", slug)
+}
+
+// ResolveAdminWorld maps a world slug (within a known admin server) to
+// its ULID. On miss it calls listAdminWorlds and walks the result.
+func (c *Client) ResolveAdminWorld(ctx context.Context, serverID, slug string) (string, error) {
+	c.cache.mu.RLock()
+	if m, ok := c.cache.adminWorlds[serverID]; ok {
+		if id, ok := m[slug]; ok {
+			c.cache.mu.RUnlock()
+			return id, nil
+		}
+	}
+	c.cache.mu.RUnlock()
+
+	worlds, err := c.ListAdminWorlds(ctx, serverID)
+	if err != nil {
+		return "", err
+	}
+
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	m := c.cache.adminWorlds[serverID]
+	if m == nil {
+		m = map[string]string{}
+		c.cache.adminWorlds[serverID] = m
+	}
+	for _, w := range worlds {
+		m[w.Slug] = w.ID
+	}
+	if id, ok := m[slug]; ok {
+		return id, nil
+	}
+	return "", notFound("world", slug)
+}
+
+// InvalidateAdminServers drops the admin server cache. Call after
+// createServer / deleteServer.
+func (c *Client) InvalidateAdminServers() {
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	c.cache.adminServers = map[string]string{}
+}
+
+// InvalidateAdminWorlds drops the cached admin worlds for the given
+// server. Call after proposeWorld / cancelWorld.
+func (c *Client) InvalidateAdminWorlds(serverID string) {
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	delete(c.cache.adminWorlds, serverID)
+}

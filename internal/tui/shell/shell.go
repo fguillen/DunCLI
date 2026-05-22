@@ -23,16 +23,29 @@ type Options struct {
 	// built-in verb.
 	Version string
 
+	// Mode selects the REPL surface. The zero value (ModePlayer) is
+	// the player `dun>` shell; ModeAdmin is the `dun-admin>` shell.
+	Mode Mode
+
 	// PostLoginPicker, when true, asks the configured PickServer hook
 	// (set via SetPostLoginPicker) to run before the prompt loop
 	// begins. The hook is registered by the verbs package so the
-	// shell stays free of game-specific imports.
+	// shell stays free of game-specific imports. Player-only.
 	PostLoginPicker bool
 
 	// SingleMemberSlug, if non-empty, is auto-applied to the session
 	// Context.ServerSlug — the "exactly one server" branch of the
 	// post-login flow that does not need the interactive picker.
+	// Player-only.
 	SingleMemberSlug string
+}
+
+// promptString is the readline prompt prefix for the given mode.
+func promptString(m Mode) string {
+	if m == ModeAdmin {
+		return "dun-admin> "
+	}
+	return "dun> "
 }
 
 // PostLoginPicker is the hook the verbs package registers so the
@@ -54,7 +67,7 @@ func SetPostLoginPicker(f func(ctx context.Context, sess *Session) error) {
 func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, opts Options) error {
 	// Build the session.
 	scope := NewContext()
-	state := NewFileStore(cfgBaseURL, credEmail)
+	state := newStateStore(opts.Mode, cfgBaseURL, credEmail)
 	if snap, err := state.Load(); err == nil {
 		scope.Apply(snap)
 	}
@@ -69,12 +82,14 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 		Creds:   CredentialSnapshot{Email: credEmail},
 		Context: scope,
 		Out:     os.Stdout,
+		Mode:    opts.Mode,
 		State:   state,
 	}
 
-	// Register built-ins (idempotent across re-entries within the
-	// same process; in practice Run is called once per invocation).
-	registerBuiltinsOnce(opts.Version)
+	// Register built-ins into this mode's registry (idempotent across
+	// re-entries within the same process; in practice Run is called
+	// once per invocation).
+	registerBuiltinsOnce(sess.registry(), opts.Version)
 
 	// Connectivity probe — fail fast and loud if the backend is
 	// unreachable. The error renderer pulls the typed code +
@@ -96,14 +111,15 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 		}
 	}
 
-	rl, err := newReadline(sess)
+	prompt := promptString(opts.Mode)
+	rl, err := newReadline(sess, prompt)
 	if err != nil {
 		return fmt.Errorf("shell: init readline: %w", err)
 	}
 	defer func() { _ = rl.Close() }()
 
 	st := theme.Active()
-	rl.SetPrompt(st.Prompt.Render("dun> "))
+	rl.SetPrompt(st.Prompt.Render(prompt))
 
 	for {
 		line, err := rl.Readline()
@@ -132,9 +148,20 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 	}
 }
 
+// newStateStore returns the session-context store for the given mode:
+// ~/.dun/state.json for the player shell, ~/.dun/admin-state.json for
+// the admin shell.
+func newStateStore(m Mode, baseURL, email string) *FileStore {
+	if m == ModeAdmin {
+		return NewAdminFileStore(baseURL, email)
+	}
+	return NewFileStore(baseURL, email)
+}
+
 // newReadline builds the *readline.Instance with the history file
-// and tab completer wired in. ~/.dun/ is created lazily at 0700.
-func newReadline(sess *Session) (*readline.Instance, error) {
+// and tab completer wired in. ~/.dun/ is created lazily at 0700. Both
+// shells share the one ~/.dun/history file.
+func newReadline(sess *Session, prompt string) (*readline.Instance, error) {
 	historyPath, err := historyPath()
 	if err != nil {
 		return nil, err
@@ -143,7 +170,7 @@ func newReadline(sess *Session) (*readline.Instance, error) {
 		return nil, fmt.Errorf("mkdir history dir: %w", err)
 	}
 	return readline.NewEx(&readline.Config{
-		Prompt:            "dun> ",
+		Prompt:            prompt,
 		HistoryFile:       historyPath,
 		AutoComplete:      NewCompleter(sess),
 		InterruptPrompt:   "^C",
@@ -160,15 +187,13 @@ func historyPath() (string, error) {
 	return filepath.Join(home, ".dun", "history"), nil
 }
 
-// registerBuiltinsOnce guards built-in registration so a test that
-// invokes Run multiple times in-process doesn't trip the duplicate
-// panic in Register.
-var builtinsRegistered bool
-
-func registerBuiltinsOnce(version string) {
-	if builtinsRegistered {
+// registerBuiltinsOnce guards built-in registration per registry so a
+// test that invokes Run multiple times in-process doesn't trip the
+// duplicate panic in registry.add.
+func registerBuiltinsOnce(reg *registry, version string) {
+	if reg.builtinsRegistered {
 		return
 	}
-	registerBuiltins(version)
-	builtinsRegistered = true
+	registerBuiltins(reg, version)
+	reg.builtinsRegistered = true
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fguillen/dun-cli/internal/api/gen"
+	"github.com/fguillen/dun-cli/internal/auth"
 )
 
 func newKeysCmd() *cobra.Command {
@@ -95,7 +96,7 @@ func runKeysRevoke(ctx context.Context, out io.Writer, id string) error {
 	if revokingCurrent {
 		cur, ok := sess.store.CurrentCredential()
 		if ok {
-			sess.store.Delete(cur.BaseURL, cur.Email)
+			sess.store.Delete(cur.BaseURL, cur.Email, auth.ScopePlayer)
 			if err := sess.store.Save(); err != nil {
 				return fmt.Errorf("save credentials: %w", err)
 			}

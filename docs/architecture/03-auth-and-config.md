@@ -70,11 +70,17 @@ re-deriving the path.
 
 [internal/auth/store.go](../../internal/auth/store.go) is the
 file-backed credentials store. One file holds every `(base_url,
-email)` credential the user has logged in with, plus a `[current]`
-pointer that names the active one.
+email, scope)` credential the user has logged in with, plus two
+pointer tables — `[current]` for the player surface and
+`[current_admin]` for the admin surface — that each name the active
+credential for their scope.
 
 ```toml
 [current]
+base_url = "http://localhost:3000/v1"
+email = "fg@example.com"
+
+[current_admin]
 base_url = "http://localhost:3000/v1"
 email = "fg@example.com"
 
@@ -83,33 +89,42 @@ base_url = "http://localhost:3000/v1"
 email = "fg@example.com"
 api_key = "k_abc…"
 expires_at = 2026-08-18T12:00:00Z
+# scope omitted ⇒ player
 
 [[credentials]]
-base_url = "https://dun.example.com/v1"
+base_url = "http://localhost:3000/v1"
 email = "fg@example.com"
-api_key = "k_def…"
-expires_at = 2026-07-30T09:00:00Z
+api_key = "k_adm…"
+expires_at = 2026-08-18T12:00:00Z
+scope = "admin"
 ```
 
 This shape supports a single user who works against multiple
-backends (dev, prod) **and** multiple identities per backend (rare,
-but cheap to support). The `[current]` table picks one.
+backends (dev, prod), multiple identities per backend, **and** a
+player + an admin key for the same email. The `scope` field (Phase
+14; empty normalizes to `"player"`) makes the last case two distinct
+entries that never clobber. `[current]` and `[current_admin]` are
+independent, so the `dun>` and `dun-admin>` shells never overwrite
+each other's active credential.
 
 ### `Store` API
 
 ```go
 type Store struct {
-    Current     currentRef
-    Credentials []Credential
+    Current      currentRef // player [current]
+    CurrentAdmin currentRef // admin  [current_admin]
+    Credentials  []Credential
 }
 
 func LoadStore() (*Store, error)
 func (s *Store) Save() error
-func (s *Store) Upsert(c Credential)
-func (s *Store) Get(baseURL, email string) (Credential, bool)
-func (s *Store) CurrentCredential() (Credential, bool)
-func (s *Store) SetCurrent(baseURL, email string) error
-func (s *Store) Delete(baseURL, email string)
+func (s *Store) Upsert(c Credential)                          // keyed (base, email, scope)
+func (s *Store) Get(baseURL, email, scope string) (Credential, bool)
+func (s *Store) CurrentCredential() (Credential, bool)        // player
+func (s *Store) CurrentAdminCredential() (Credential, bool)   // admin
+func (s *Store) SetCurrent(baseURL, email string) error       // player
+func (s *Store) SetCurrentAdmin(baseURL, email string) error  // admin
+func (s *Store) Delete(baseURL, email, scope string)
 func (s *Store) Clear()
 ```
 
@@ -118,25 +133,43 @@ func (s *Store) Clear()
 - `Save` writes atomically: temp file in the same directory at mode
   0600, then `os.Rename`. The directory is created at mode 0700.
   Mid-write crashes leave the previous file intact.
-- `SetCurrent` rejects an unknown `(baseURL, email)` — the credential
-  must already exist via `Upsert`.
-- `Delete` clears `[current]` if it was pointing at the removed row.
-- `Clear` wipes everything; used by `dun account delete` after the
-  backend has already revoked every key.
+- `Get` / `Upsert` / `Delete` key on `(base_url, email, scope)`; an
+  empty scope normalizes to `"player"`. `SetCurrent` /
+  `SetCurrentAdmin` reject an unknown `(baseURL, email)` for their
+  scope — the credential must already exist via `Upsert`.
+- `Delete` clears the matching pointer (`[current]` or
+  `[current_admin]`) if it was pointing at the removed row.
+- `Clear` wipes everything — every credential and both pointer
+  tables; used by `dun account delete` after the backend has already
+  revoked every key.
 
 ### `FileProvider` — the bridge to `internal/api`
 
 [internal/auth/provider.go](../../internal/auth/provider.go) adapts a
-`*Store` to `api.TokenProvider`:
+`*Store` to `api.TokenProvider`. A `FileProvider` carries the scope it
+serves: `NewFileProvider(store)` is player-scope, `NewAdminFileProvider(store)`
+is admin-scope. `Token()` follows the matching pointer:
 
 ```go
 func (p *FileProvider) Token(_ context.Context) (string, error) {
     if p == nil || p.store == nil { return "", nil }
-    c, ok := p.store.CurrentCredential()
+    var c Credential
+    var ok bool
+    if p.scope == ScopeAdmin {
+        c, ok = p.store.CurrentAdminCredential()
+    } else {
+        c, ok = p.store.CurrentCredential()
+    }
     if !ok { return "", nil }
     return c.APIKey, nil
 }
 ```
+
+`loadSession()` builds a player client (`NewFileProvider`);
+`loadAdminSession()` builds an admin client (`NewAdminFileProvider`).
+The api.Client is otherwise identical — scope is decided entirely by
+which provider it was handed (see [02-api-client.md](02-api-client.md)
+"The two bearer seams").
 
 Two implications:
 
@@ -213,7 +246,38 @@ locked out.
 
 This is the only place in the CLI where one command (`login`) flows
 into another long-running command (the REPL). All other Cobra
-subcommands exit when they're done.
+subcommands exit when they're done — except `dun admin login`, which
+mirrors this handoff into the admin shell.
+
+---
+
+## Admin scope (Phase 14)
+
+The admin surface reuses every piece above with two differences: a
+different `scope` on the credential and a different pointer table.
+
+- **`dun admin login`** ([admin_login.go](../../cmd/dun/admin_login.go))
+  is `runLogin` with `requestAdminMagicLink` / `exchangeAdminMagicLink`
+  in place of the player operations. It additionally checks the
+  exchange response's `owner.type` is `admin` and refuses to persist
+  the key otherwise — a guard against pasting a player token at the
+  admin prompt. The credential is `Upsert`-ed with `Scope: ScopeAdmin`
+  and `SetCurrentAdmin` points `[current_admin]` at it. On success it
+  hands off to `enterAdminShell` (no membership picker — admin server
+  verbs arrive in Phase 15).
+- **`dun admin logout`** ([admin_logout.go](../../cmd/dun/admin_logout.go))
+  is `runLogout` against `listAdminApiKeys` / `revokeAdminApiKey`,
+  deleting the `ScopeAdmin` entry.
+- **`loadAdminSession()`** is `loadSession()` built with
+  `auth.NewAdminFileProvider`. Both go through a shared
+  `loadSessionWith(newProvider)` helper in
+  [cmd/dun/client.go](../../cmd/dun/client.go).
+
+Key management for the admin surface is **not** a Cobra command — it
+is the `keys` verb *inside* the `dun-admin>` shell (see
+[05-verbs.md](05-verbs.md) "admin/"). The admin `keys revoke` of the
+session's own current key clears the local admin credential the same
+way `dun keys revoke` does for the player.
 
 ---
 
@@ -301,17 +365,22 @@ without changing the rest of the codebase.
 cover:
 
 - Missing-file behavior (no error, defaults applied).
-- TOML round-trip — write, reload, compare.
+- TOML round-trip — write, reload, compare (including the `scope`
+  field and `[current_admin]`).
 - File permissions — credentials file is mode 0600 after Save.
 - `[current]` cleared when the active credential is deleted.
 - `FileProvider` re-reads on every call (mutate `store.Current`, then
   call `Token()` again — fresh value comes back).
+- Player and admin credentials for the same `(base_url, email)`
+  coexist as two entries; `NewAdminFileProvider` yields the admin key,
+  `NewFileProvider` the player key.
 
-[cmd/dun/login_test.go](../../cmd/dun/login_test.go) and
-[cmd/dun/logout_test.go](../../cmd/dun/logout_test.go) use an
+[cmd/dun/login_test.go](../../cmd/dun/login_test.go),
+[cmd/dun/logout_test.go](../../cmd/dun/logout_test.go) and
+[cmd/dun/admin_test.go](../../cmd/dun/admin_test.go) use an
 `httptest.Server` to stub the backend and feed canned input via
-`cmd.SetIn(strings.NewReader(...))` — the magic-link prompts are
-exercised without a real terminal.
+`cmd.SetIn(strings.NewReader(...))` — the magic-link prompts (player
+and admin) are exercised without a real terminal.
 
 Filesystem isolation is `t.Setenv("HOME", t.TempDir())` for every
 test that touches `~/.dun/`; no test ever pollutes the developer's

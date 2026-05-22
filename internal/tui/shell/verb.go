@@ -82,59 +82,107 @@ func (v *Verb) FlagByName(name string) (FlagSpec, bool) {
 	return FlagSpec{}, false
 }
 
-// registry is the process-wide verb registry. Init order does not
-// matter: verbs.* packages call Register from init(), shell.Run
-// reads the registry on startup.
+// Mode discriminates the two REPL surfaces. The player `dun>` shell and
+// the admin `dun-admin>` shell run the same engine (dispatcher,
+// completion, selectors) but each draws verbs from its own registry.
+// ModePlayer is the zero value so a bare Options{} stays the player
+// shell.
+type Mode int
+
+const (
+	// ModePlayer is the player `dun>` surface.
+	ModePlayer Mode = iota
+	// ModeAdmin is the admin `dun-admin>` surface.
+	ModeAdmin
+)
+
+// registry is one verb namespace. Init order does not matter: verbs.*
+// packages call Register / RegisterAdmin from init(), shell.Run reads
+// the matching registry on startup.
 type registry struct {
-	mu    sync.RWMutex
-	verbs map[string]*Verb
+	mu                 sync.RWMutex
+	verbs              map[string]*Verb
+	builtinsRegistered bool
 }
 
-var defaultRegistry = &registry{verbs: map[string]*Verb{}}
+// defaultRegistry holds the player verbs; adminRegistry holds the admin
+// verbs. They are wholly independent — a process runs one shell, so a
+// given Run only ever touches one registry.
+var (
+	defaultRegistry = &registry{verbs: map[string]*Verb{}}
+	adminRegistry   = &registry{verbs: map[string]*Verb{}}
+)
 
-// Register adds a top-level verb. Panics on duplicate name —
+// registryForMode returns the verb registry backing the given mode.
+func registryForMode(m Mode) *registry {
+	if m == ModeAdmin {
+		return adminRegistry
+	}
+	return defaultRegistry
+}
+
+// add inserts a verb into this registry. Panics on duplicate name —
 // duplicate registration is a programming bug, never a runtime
 // condition. Aliases (e.g. quit / exit) are intentionally registered
 // as two distinct verbs that point at the same Handler.
-func Register(v *Verb) {
+func (r *registry) add(v *Verb) {
 	if v == nil || v.Name == "" {
 		panic("shell.Register: nil or unnamed verb")
 	}
-	defaultRegistry.mu.Lock()
-	defer defaultRegistry.mu.Unlock()
-	if _, exists := defaultRegistry.verbs[v.Name]; exists {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.verbs[v.Name]; exists {
 		panic("shell.Register: duplicate verb " + v.Name)
 	}
-	defaultRegistry.verbs[v.Name] = v
+	r.verbs[v.Name] = v
 }
 
-// Resolve looks up a verb by name. Returns (nil, false) when no such
-// verb exists.
-func Resolve(name string) (*Verb, bool) {
-	defaultRegistry.mu.RLock()
-	defer defaultRegistry.mu.RUnlock()
-	v, ok := defaultRegistry.verbs[name]
+// resolve looks up a verb by name within this registry.
+func (r *registry) resolve(name string) (*Verb, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.verbs[name]
 	return v, ok
 }
 
-// Verbs returns every registered top-level verb, sorted by name.
-// Used by `help` and the completion engine.
-func Verbs() []*Verb {
-	defaultRegistry.mu.RLock()
-	defer defaultRegistry.mu.RUnlock()
-	out := make([]*Verb, 0, len(defaultRegistry.verbs))
-	for _, v := range defaultRegistry.verbs {
+// list returns every verb in this registry, sorted by name.
+func (r *registry) list() []*Verb {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*Verb, 0, len(r.verbs))
+	for _, v := range r.verbs {
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
+// Register adds a top-level verb to the player registry.
+func Register(v *Verb) { defaultRegistry.add(v) }
+
+// RegisterAdmin adds a top-level verb to the admin registry. The admin
+// verbs package calls this from init(), mirroring Register.
+func RegisterAdmin(v *Verb) { adminRegistry.add(v) }
+
+// Resolve looks up a player verb by name. Returns (nil, false) when no
+// such verb exists. Admin code paths resolve via the session's mode.
+func Resolve(name string) (*Verb, bool) { return defaultRegistry.resolve(name) }
+
+// ResolveAdmin looks up an admin verb by name — the admin-registry
+// sibling of Resolve, used by the admin verb packages' tests.
+func ResolveAdmin(name string) (*Verb, bool) { return adminRegistry.resolve(name) }
+
+// Verbs returns every registered player verb, sorted by name.
+func Verbs() []*Verb { return defaultRegistry.list() }
+
 // reset is used by tests to drop registrations between cases.
 func reset() {
-	defaultRegistry.mu.Lock()
-	defer defaultRegistry.mu.Unlock()
-	defaultRegistry.verbs = map[string]*Verb{}
+	for _, r := range []*registry{defaultRegistry, adminRegistry} {
+		r.mu.Lock()
+		r.verbs = map[string]*Verb{}
+		r.builtinsRegistered = false
+		r.mu.Unlock()
+	}
 }
 
 // Session is what every verb handler receives. It bundles the API
@@ -148,11 +196,20 @@ type Session struct {
 	Context *Context
 	Out     io.Writer
 
+	// Mode is the REPL surface this session belongs to. It selects the
+	// verb registry the dispatcher / completion engine draw from and
+	// tunes a couple of built-ins (e.g. `where` hides the kingdom line
+	// in admin mode).
+	Mode Mode
+
 	// State is the on-disk session-context store, set by shell.Run
 	// before the prompt loop starts. Verbs that mutate Context call
 	// Save() so the change survives a restart.
 	State StateStore
 }
+
+// registry returns the verb registry backing this session's mode.
+func (s *Session) registry() *registry { return registryForMode(s.Mode) }
 
 // ConfigSnapshot is the read-only view of ~/.dun/config.toml the
 // shell hands to verbs. Phase 4 only needs the base URL; later

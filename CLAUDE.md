@@ -13,8 +13,13 @@ load. See [PRODUCT.md](PRODUCT.md) for positioning,
 [docs/tutorial.md](docs/tutorial.md) for the end-user walkthrough of
 every shipped command.
 
-**v1 scope is player surface only.** Admin endpoints (`/v1/admin/...`) are
-explicitly out of scope.
+**Two tracks.** Phases 0–13 are the **player surface** (v1) and shipped
+first. Phases 14–18 are the **admin surface** — a second track on top
+of v1 (server / world / team administration). Phase 14 (admin auth &
+shell) has shipped; `/v1/admin/...` endpoints are now in scope for that
+track. Admin lives in a separate mode of the same binary: `dun admin`
+enters a dedicated `dun-admin>` REPL with its own credential scope and
+session-context file. See [TODO.md](TODO.md) for the phase breakdown.
 
 ## Stack
 
@@ -28,7 +33,8 @@ explicitly out of scope.
 - **Config**: `spf13/viper` (TOML at `~/.dun/config.toml`) — added in
   Phase 2.
 - **Credential storage**: file at `~/.dun/credentials` (TOML, mode
-  0600). No OS keychain. Added in Phase 2.
+  0600). No OS keychain. Added in Phase 2; a `scope` field (Phase 14)
+  lets a player and an admin key for the same email coexist.
 - **Logging**: `log/slog`, JSON appended to `~/.dun/dun-cli.log`. The
   REPL prompt and transient selectors never write log lines to
   stdout/stderr.
@@ -36,7 +42,7 @@ explicitly out of scope.
   `charmbracelet/x/exp/teatest`.
 - **Lint**: `golangci-lint` (errcheck, govet, ineffassign, revive,
   staticcheck, unused + `gofumpt` formatter).
-- **Release** (Phase 14): GoReleaser → Homebrew tap + Scoop bucket +
+- **Release** (Phase 19): GoReleaser → Homebrew tap + Scoop bucket +
   GitHub Releases.
 
 ## Storage layout (`~/.dun/`)
@@ -46,11 +52,13 @@ user's home — in the spirit of `~/.aws/`, `~/.ssh/`, `~/.kube/`.
 
 ```
 ~/.dun/
-├── config.toml      # defaults (base URL, log level, theme)
-├── credentials      # api keys, TOML, mode 0600
-├── history          # REPL line history
-├── state.json       # last-used server/world/kingdom context
-└── dun-cli.log      # JSON slog output, append-mode
+├── config.toml        # defaults (base URL, log level, theme)
+├── credentials        # api keys, TOML, mode 0600 — player + admin
+│                      #   entries coexist via a `scope` discriminator
+├── history            # REPL line history (shared by both shells)
+├── state.json         # last-used server/world/kingdom (player shell)
+├── admin-state.json   # last-used server/world (admin shell)
+└── dun-cli.log        # JSON slog output, append-mode
 ```
 
 Rules:
@@ -119,9 +127,15 @@ rationale. Implementation rules:
   `dun servers list`-style one-shot subcommand for game actions.
 - Cobra is used only for top-level operational commands that make
   sense *outside* an authenticated session: `dun login`,
-  `dun logout`, `dun version`, `dun completion`. Everything else
-  (servers, worlds, kingdoms, armies, battles, trade, wonders) is a
-  verb inside the shell.
+  `dun logout`, `dun version`, `dun completion`, and the admin-track
+  `dun admin` / `dun admin login` / `dun admin logout`. Everything
+  else (servers, worlds, kingdoms, armies, battles, trade, wonders) is
+  a verb inside the shell.
+- The admin surface is the same engine in a second mode. `dun admin`
+  enters the `dun-admin>` REPL; its verbs register into a separate
+  registry via `shell.RegisterAdmin` (vs `shell.Register` for player
+  verbs) and live under `internal/tui/verbs/admin/`. A process runs
+  one shell or the other, never both.
 - The shell prompt does **not** use `tea.WithAltScreen()` — terminal
   scrollback must be preserved so users can copy/paste lines.
 - Individual game commands MAY launch a transient Bubble Tea program
@@ -233,8 +247,9 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
 
 - Don't hand-edit `docs/backend/*` or `internal/api/gen/*` — both are
   generated. Regenerate via `make generate` or the sync script.
-- Don't implement `/v1/admin/...` endpoints. Out of scope for v1.
 - Don't add features beyond what the current phase calls for. Roadmap
-  ordering matters: each phase builds on the previous.
+  ordering matters: each phase builds on the previous. `/v1/admin/...`
+  endpoints are in scope only as part of the admin track (Phases
+  14–18) — don't pull admin work forward into a player-phase commit.
 - Don't introduce backwards-compat shims for in-progress work — this
   project has no v0 to be compatible with yet.

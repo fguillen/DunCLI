@@ -29,6 +29,9 @@ under [cmd/dun/](../../cmd/dun/) and wired in
 | `dun keys list` | `listPlayerApiKeys` | [keys.go](../../cmd/dun/keys.go) | Tabwriter dump; status is derived (revoked/current/active) |
 | `dun keys revoke <id>` | `listPlayerApiKeys`, `revokePlayerApiKey` | [keys.go](../../cmd/dun/keys.go) | Detects "revoking my own current key" and clears local entry |
 | `dun account delete` | `deleteAccount` | [account.go](../../cmd/dun/account.go) | Single y/N confirm; clears local credentials on success |
+| `dun admin` (bare) | `getHealth` (probe) | [admin.go](../../cmd/dun/admin.go) | Drops into the `dun-admin>` REPL shell (Phase 14) |
+| `dun admin login` | `requestAdminMagicLink`, `exchangeAdminMagicLink` | [admin_login.go](../../cmd/dun/admin_login.go) | Admin magic-link flow; validates owner type is `admin`; persists with `scope = "admin"`; hands off to the admin shell |
+| `dun admin logout` | `listAdminApiKeys`, `revokeAdminApiKey` | [admin_logout.go](../../cmd/dun/admin_logout.go) | Lists to find `current: true`, revokes, then clears the local admin entry |
 
 Architecture: see [03-auth-and-config.md](03-auth-and-config.md).
 
@@ -46,7 +49,10 @@ in [shell/builtin.go](../../internal/tui/shell/builtin.go).
 | `clear` | ANSI clear + home |
 | `version` | Prints the shell's version |
 | `whoami` | Active credential email + base URL |
-| `where` | Active (server, world, kingdom) scope |
+| `where` | Active scope — `(server, world, kingdom)`, or `(server, world)` in the admin shell |
+
+The built-ins are registered into both the player and the admin
+registry, so they work identically in `dun>` and `dun-admin>`.
 
 Architecture: see [04-repl-shell.md](04-repl-shell.md) "Built-in
 verbs".
@@ -164,32 +170,42 @@ subpackage never imports `battles/` directly.
 
 ---
 
-## Phases not yet shipped
+## Admin track — REPL verbs
 
-The following phases of [TODO.md](../../TODO.md) are tracked but not
-implemented. operationIds listed here for forward navigation; expect
-this section to migrate into the verb table above as each phase
-lands.
+Registered from
+[internal/tui/verbs/admin/*.go](../../internal/tui/verbs/admin/) via
+`init()` → `shell.RegisterAdmin`, so they surface only in the
+`dun-admin>` shell. Architecture: [05-verbs.md](05-verbs.md) "admin/".
 
-- **Phase 14 — Polish, packaging & distribution**: no new endpoints
+### Phase 14 — Admin auth & shell
+
+| Verb | operationId | Source | Notes |
+|---|---|---|---|
+| `keys list` | `listAdminApiKeys` | [admin/keys.go](../../internal/tui/verbs/admin/keys.go) | Tabwriter dump; status derived (revoked/current/active) — the in-shell mirror of `dun keys list` |
+| `keys revoke <id>` | `listAdminApiKeys`, `revokeAdminApiKey` | [admin/keys.go](../../internal/tui/verbs/admin/keys.go) | Detects "revoking this session's current key" and clears the local admin credential; `<id>` tab-completes from non-revoked keys |
+
+Phase 14 also wired the admin foundation that Phases 15–18 consume:
+the `dun admin` entrypoint, the `shell.Mode` discriminator + admin
+verb registry, the `scope = "admin"` credential field +
+`[current_admin]` pointer, and the `ResolveAdminServer` /
+`ResolveAdminWorld` resolvers in `internal/api`.
 
 ---
 
-## Out of scope for v1
+## Phases not yet shipped
 
-The following admin operationIds are **explicitly out of scope** for
-v1 ([TODO.md](../../TODO.md)) and have no CLI surface:
+The following phases of [TODO.md](../../TODO.md) are tracked but not
+implemented. Expect this section to migrate into the tables above as
+each phase lands.
 
-`requestAdminMagicLink`, `exchangeAdminMagicLink`, `listAdminApiKeys`,
-`revokeAdminApiKey`, `listAdminServers`, `createServer`,
-`updateServer`, `deleteServer`, `listServerAdmins`,
-`inviteServerAdmin`, `revokeServerAdmin`, `listServerInvitations`,
-`createServerInvitation`, `deleteServerInvitation`,
-`listServerMembers`, `listAdminWorlds`, `proposeWorld`,
-`showAdminWorld`, `configureWorld`, `cancelWorld`, `startWorld`,
-`listWorldInvitations`, `createWorldInvitation`,
-`deleteWorldInvitation`, `listWorldBattles`.
-
-The wrapper's `bearerSource.AdminBearer` returns an error rather than
-silently sending an empty token — see
-[02-api-client.md](02-api-client.md) "Lazy bearer tokens".
+- **Phases 15–18 — Admin server / team / world / battle verbs**:
+  `listAdminServers`, `createServer`, `updateServer`, `deleteServer`,
+  `listServerAdmins`, `inviteServerAdmin`, `revokeServerAdmin`,
+  `listServerInvitations`, `createServerInvitation`,
+  `deleteServerInvitation`, `listServerMembers`, `listAdminWorlds`,
+  `proposeWorld`, `showAdminWorld`, `configureWorld`, `cancelWorld`,
+  `startWorld`, `listWorldInvitations`, `createWorldInvitation`,
+  `deleteWorldInvitation`, `listWorldBattles`. (`listAdminServers` /
+  `listAdminWorlds` already have wrapper methods + resolvers from
+  Phase 14; Phases 15/17 add the verbs that call them.)
+- **Phase 19 — Polish, packaging & distribution**: no new endpoints.

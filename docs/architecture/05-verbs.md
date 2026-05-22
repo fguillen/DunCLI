@@ -50,6 +50,14 @@ By the time `shell.Run` reads the registry, every verb is registered.
 See [04-repl-shell.md](04-repl-shell.md) "The verb registry" for the
 side of the contract the shell sees.
 
+**Admin verbs** ([internal/tui/verbs/admin/](../../internal/tui/verbs/admin/),
+Phase 14+) are identical in shape but call `shell.RegisterAdmin`
+instead of `shell.Register`, so they land in the admin registry the
+`dun-admin>` shell draws from — invisible to the player shell, and
+vice versa. `cmd/dun/main.go` blank-imports the `admin` package
+alongside the player ones. Phase 14 ships one admin verb, `keys`
+(see the per-file tour); Phases 15–18 add the rest.
+
 The verbs package can also call hooks the shell exposes:
 
 ```go
@@ -516,6 +524,22 @@ The print logic deliberately treats unknown leaderboard kinds gracefully
 canonical ones with neutral `score=` / `secondary=` column labels, no
 truncation cap. Same defensive shape as `terrainGlyph` falling back to
 `?` in [regions.go](../../internal/tui/verbs/regions.go).
+
+### [admin/keys.go](../../internal/tui/verbs/admin/keys.go) — Phase 14
+
+The first verb of the admin shell. Registered with
+`shell.RegisterAdmin` (not `Register`), so it appears only in the
+`dun-admin>` REPL.
+
+| Verb | operationId | Notes |
+|---|---|---|
+| `keys list` | `listAdminApiKeys` | Tabwriter table `ID \| NAME \| LAST USED \| EXPIRES \| STATUS` — the in-shell mirror of the player `dun keys list` cobra command |
+| `keys revoke <id>` | `revokeAdminApiKey` | Revokes by ULID. If the id is the session's own `current: true` key, the local admin credential is reloaded from disk, deleted, and saved — same "invalidate this machine" semantics as `dun keys revoke`. `<id>` tab-completes from the non-revoked keys |
+
+The verb package is the admin-track sibling of the player verb
+packages — Phases 15–18 add admin server / world / team verbs here (or
+in sibling subpackages). The auth foundation it sits on is in
+[03-auth-and-config.md](03-auth-and-config.md) "Admin scope".
 
 ### [render.go](../../internal/tui/verbs/render.go) — shared
 

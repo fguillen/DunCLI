@@ -28,6 +28,11 @@ Two layers of commands:
 You refer to game entities by their **name or slug** (`acme`,
 `IronFist`), never by an internal ID.
 
+There is also a separate **admin shell** — `dun admin` enters a
+`dun-admin>` prompt for server / world administration. It is its own
+mode of the same binary; most players never need it. See
+[§20](#20-the-admin-shell).
+
 ## 2. Installation
 
 There are no pre-built binaries yet — install from source.
@@ -1862,40 +1867,159 @@ Everything the CLI persists lives under a single `~/.dun/` directory
 | Path | Purpose | Mode |
 |------|---------|------|
 | `~/.dun/config.toml` | Optional. Overrides default base URL. | 0644 |
-| `~/.dun/credentials` | TOML. API keys and the `[current]` pointer. | 0600 |
-| `~/.dun/history` | REPL line history. | 0644 |
-| `~/.dun/state.json` | Last-used `(server, world, kingdom)` scope per credential. | 0644 |
+| `~/.dun/credentials` | TOML. API keys + the `[current]` / `[current_admin]` pointers. | 0600 |
+| `~/.dun/history` | REPL line history (shared by both shells). | 0644 |
+| `~/.dun/state.json` | Last-used `(server, world, kingdom)` scope — player shell. | 0644 |
+| `~/.dun/admin-state.json` | Last-used `(server, world)` scope — admin shell. | 0644 |
 | `~/.dun/dun-cli.log` | JSON slog output, append-mode. | 0644 |
 
 ### Multiple accounts
 
 `~/.dun/credentials` holds a list of credentials keyed by
-`(base_url, email)` plus a `[current]` table that points at the
-active one. You can be logged in to several `(base_url, email)`
-combinations simultaneously — e.g. one for a local dev backend and
-one for a production server.
+`(base_url, email, scope)` plus two pointer tables — `[current]` for
+the player surface, `[current_admin]` for the admin surface — that
+each name the active credential for their scope. You can be logged in
+to several `(base_url, email)` combinations simultaneously — e.g. one
+for a local dev backend and one for a production server — and a
+player and an admin key for the same email coexist as two separate
+entries (the `scope` field; an entry with no `scope` is a player
+credential).
 
 To switch accounts today:
 
-- Re-run `dun login` with a different email. The new credential is
-  added and made current.
-- Or edit `~/.dun/credentials` directly and change the `[current]`
-  block.
+- Re-run `dun login` (or `dun admin login`) with a different email.
+  The new credential is added and made current for its scope.
+- Or edit `~/.dun/credentials` directly and change the `[current]` /
+  `[current_admin]` block.
 
 ### Session state isolation
 
-`~/.dun/state.json` records your scope (`server_slug`, `world_slug`,
-`kingdom_handle`) together with the `(base_url, email)` it belongs
-to. When the shell starts, scope is only re-applied if it matches the
+`~/.dun/state.json` records your player scope (`server_slug`,
+`world_slug`, `kingdom_handle`) and `~/.dun/admin-state.json` your
+admin scope — each together with the `(base_url, email)` it belongs
+to. When a shell starts, scope is only re-applied if it matches the
 current credential — so switching accounts doesn't accidentally drop
-you into someone else's server.
+you into someone else's server. The two files are separate so the
+`dun>` and `dun-admin>` scopes never overwrite each other.
 
-## 20. Troubleshooting
+## 20. The admin shell
+
+Everything above is the **player** surface. dun also has an **admin**
+surface — server, world and team administration — that lives in a
+separate mode of the same binary: `dun admin` drops you into a
+`dun-admin>` REPL instead of `dun>`.
+
+The two shells never share a process: a player session and an admin
+session can't mix mid-session. They do share the one `~/.dun/`
+dotfolder — your admin API key sits alongside your player key in
+`~/.dun/credentials` under a separate `scope`, and the admin shell
+remembers its own scope in `~/.dun/admin-state.json`.
+
+> Admin access is granted by whoever runs the dun backend. If
+> `dun admin login` reports your token is the wrong scope, your email
+> isn't registered as an admin on that server.
+
+### `dun admin login`
+
+Authenticate with a magic-link email, exactly like `dun login` — but
+against the admin endpoints:
+
+```
+$ dun admin login
+Email: boss@example.com
+Magic-link email sent. Check your inbox.
+Token: 7f3a8b2c9d1e4f6a
+Logged in as admin boss@example.com (expires 2026-08-17).
+Connected to http://localhost:3000/v1 as boss@example.com
+dun-admin>
+```
+
+The admin API key is saved to `~/.dun/credentials` with `scope =
+"admin"`. If you also use `dun login` with the same email, both keys
+coexist — they don't overwrite each other.
+
+On success you land straight at the `dun-admin>` prompt. There is no
+post-login server picker (admin server commands arrive in a later
+release).
+
+### The `dun-admin>` prompt
+
+Bare `dun admin`, once you're logged in, drops you straight at the
+prompt:
+
+```
+$ dun admin
+Connected to http://localhost:3000/v1 as boss@example.com
+dun-admin>
+```
+
+If you haven't logged in as an admin yet:
+
+```
+$ dun admin
+Error: not logged in — run `dun admin login`
+```
+
+The prompt behaves exactly like the player shell — line editing,
+history, tab completion, the `error: <message> (code=…, request_id=…)`
+format. The built-in commands are the same set: `help`, `quit` /
+`exit`, `clear`, `version`, `whoami`, `where`. `where` shows just the
+`(server, world)` scope here — admins don't have a kingdom:
+
+```
+dun-admin> where
+  server:  (none)
+  world:   (none)
+```
+
+### `keys list` / `keys revoke <id>`
+
+Admin API key management is a verb *inside* the admin shell (not a
+top-level `dun` command). It mirrors `dun keys`:
+
+```
+dun-admin> keys list
+ID            NAME    LAST USED                  EXPIRES      STATUS
+kadm_01J...   laptop  2026-05-21T09:14:00Z       2026-08-17   current
+kadm_01H...   -       -                          2026-02-01   revoked
+```
+
+`keys revoke <id>` revokes a key by ID (tab-completes from your
+non-revoked keys):
+
+```
+dun-admin> keys revoke kadm_01H...
+Revoked admin key kadm_01H....
+```
+
+If you revoke the key this very session is using, the local admin
+credential is cleared too — the shell stays open but further admin
+calls will fail until you `dun admin login` again:
+
+```
+dun-admin> keys revoke kadm_01J...
+Revoked admin key kadm_01J....
+that was this session's key — local admin credential cleared; run `dun admin login` again
+```
+
+### `dun admin logout`
+
+Run from your normal shell, not the `dun-admin>` prompt. Revokes the
+current admin key on the backend and removes it from
+`~/.dun/credentials` — your player credential is untouched:
+
+```
+$ dun admin logout
+Logged out admin boss@example.com.
+```
+
+## 21. Troubleshooting
 
 **`not logged in — run \`dun login\`\`**
 There is no `[current]` credential in `~/.dun/credentials`. Either
 run `dun login`, or edit the file's `[current]` table to point at an
-existing entry.
+existing entry. The admin-shell equivalent is `not logged in — run
+\`dun admin login\`` (no `[current_admin]` pointer).
 
 **`backend unreachable: http://localhost:3000/v1: ...`**
 The startup health probe failed. Check that your backend is running

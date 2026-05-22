@@ -52,8 +52,41 @@ func TestFileProvider_reflectsLiveStoreMutation(t *testing.T) {
 	require.Equal(t, c.APIKey, tok)
 
 	// After Delete, Token returns empty again.
-	s.Delete(c.BaseURL, c.Email)
+	s.Delete(c.BaseURL, c.Email, ScopePlayer)
 	tok, err = p.Token(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, tok)
+}
+
+func TestAdminFileProvider_selectsAdminScope(t *testing.T) {
+	// A store holding both a player and an admin credential for the same
+	// email: each provider must yield its own scope's key.
+	s := &Store{}
+	player := sampleCredential(t)
+	admin := sampleAdminCredential(t)
+	s.Upsert(player)
+	s.Upsert(admin)
+	require.NoError(t, s.SetCurrent(player.BaseURL, player.Email))
+	require.NoError(t, s.SetCurrentAdmin(admin.BaseURL, admin.Email))
+
+	playerTok, err := NewFileProvider(s).Token(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, player.APIKey, playerTok)
+
+	adminTok, err := NewAdminFileProvider(s).Token(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, admin.APIKey, adminTok)
+}
+
+func TestAdminFileProvider_noAdminCredential_returnsEmpty(t *testing.T) {
+	// A store with only a player credential: the admin provider has no
+	// [current_admin] pointer to follow and returns ("", nil).
+	s := &Store{}
+	c := sampleCredential(t)
+	s.Upsert(c)
+	require.NoError(t, s.SetCurrent(c.BaseURL, c.Email))
+
+	tok, err := NewAdminFileProvider(s).Token(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, tok)
 }

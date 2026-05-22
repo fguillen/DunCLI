@@ -23,8 +23,10 @@ import (
 	// share the parent `verbs` package; Phase 8 (military) lives in
 	// the `armies` subpackage; Phase 9 (combat reports) in `battles`;
 	// Phase 11 (trade) in `trade`; Phase 12 (wonders) in `wonders`;
-	// Phase 13 (archive & hall of fame) in `archive`.
+	// Phase 13 (archive & hall of fame) in `archive`. Phase 14 (admin
+	// shell) registers into the separate admin registry via `admin`.
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs"
+	_ "github.com/fguillen/dun-cli/internal/tui/verbs/admin"
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/archive"
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/armies"
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/battles"
@@ -50,7 +52,8 @@ func newRootCmd(out io.Writer) *cobra.Command {
 		Short: "Terminal client for the dun async multiplayer strategy game",
 		Long: "Bare `dun` drops you into the interactive shell after auth.\n" +
 			"Operational commands (login, logout, keys, account, version) are\n" +
-			"the only top-level subcommands.",
+			"the only top-level subcommands. `dun admin` enters the separate\n" +
+			"admin shell.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -98,6 +101,7 @@ func newRootCmd(out io.Writer) *cobra.Command {
 	root.AddCommand(newLogoutCmd())
 	root.AddCommand(newKeysCmd())
 	root.AddCommand(newAccountCmd())
+	root.AddCommand(newAdminCmd())
 	return root
 }
 

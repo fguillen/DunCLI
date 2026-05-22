@@ -9,9 +9,14 @@ import (
 	"path/filepath"
 )
 
-// StateFileName is the basename under ~/.dun/ that holds the
-// session-context snapshot. JSON, mode 0644.
-const StateFileName = "state.json"
+// StateFileName is the basename under ~/.dun/ that holds the player
+// session-context snapshot. AdminStateFileName is its admin-shell
+// sibling — a separate file so the `dun>` and `dun-admin>` scopes
+// never overwrite each other. Both are JSON, mode 0644.
+const (
+	StateFileName      = "state.json"
+	AdminStateFileName = "admin-state.json"
+)
 
 // stateFile is the on-disk shape. We tie the snapshot to the active
 // (BaseURL, Email) so a `dun account switch` (or a manual
@@ -24,18 +29,27 @@ type stateFile struct {
 	KingdomHandle string `json:"kingdom_handle,omitempty"`
 }
 
-// FileStore persists ContextSnapshot to ~/.dun/state.json. It is
-// keyed by (BaseURL, Email) so context belonging to a different
+// FileStore persists ContextSnapshot to a JSON file under ~/.dun/. It
+// is keyed by (BaseURL, Email) so context belonging to a different
 // credential is ignored on load — a cheap form of multi-account
-// safety.
+// safety. fileName selects state.json (player) vs admin-state.json
+// (admin) so the two shells never clobber each other's scope.
 type FileStore struct {
-	BaseURL string
-	Email   string
+	BaseURL  string
+	Email    string
+	fileName string
 }
 
-// NewFileStore returns a FileStore bound to the given credential.
+// NewFileStore returns a FileStore bound to the given player
+// credential, persisting to ~/.dun/state.json.
 func NewFileStore(baseURL, email string) *FileStore {
-	return &FileStore{BaseURL: baseURL, Email: email}
+	return &FileStore{BaseURL: baseURL, Email: email, fileName: StateFileName}
+}
+
+// NewAdminFileStore returns a FileStore bound to the given admin
+// credential, persisting to ~/.dun/admin-state.json.
+func NewAdminFileStore(baseURL, email string) *FileStore {
+	return &FileStore{BaseURL: baseURL, Email: email, fileName: AdminStateFileName}
 }
 
 // Load reads ~/.dun/state.json and returns the persisted context.
@@ -117,5 +131,9 @@ func (s *FileStore) path() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("shell: resolve home: %w", err)
 	}
-	return filepath.Join(home, ".dun", StateFileName), nil
+	name := s.fileName
+	if name == "" {
+		name = StateFileName
+	}
+	return filepath.Join(home, ".dun", name), nil
 }

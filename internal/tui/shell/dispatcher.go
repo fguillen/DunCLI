@@ -24,10 +24,16 @@ type ParsedCommand struct {
 // helpful "type `help` for available commands" hint.
 var errUnknownVerb = errors.New("unknown command")
 
-// Parse splits `line` into a ParsedCommand or returns an error. An
-// empty / whitespace-only line returns (nil, nil) so the prompt loop
-// can ignore it without rendering anything.
+// Parse splits `line` into a ParsedCommand against the player verb
+// registry. An empty / whitespace-only line returns (nil, nil) so the
+// prompt loop can ignore it without rendering anything. The dispatcher
+// uses parseWith so the admin shell resolves against its own registry.
 func Parse(line string) (*ParsedCommand, error) {
+	return parseWith(defaultRegistry, line)
+}
+
+// parseWith is Parse against an explicit verb registry.
+func parseWith(reg *registry, line string) (*ParsedCommand, error) {
 	if strings.TrimSpace(line) == "" {
 		return nil, nil
 	}
@@ -40,7 +46,7 @@ func Parse(line string) (*ParsedCommand, error) {
 	}
 
 	// Walk the verb tree.
-	root, ok := Resolve(tokens[0])
+	root, ok := reg.resolve(tokens[0])
 	if !ok {
 		return nil, fmt.Errorf("%w: %q (type `help` for a list)", errUnknownVerb, tokens[0])
 	}
@@ -126,7 +132,7 @@ func Parse(line string) (*ParsedCommand, error) {
 // the loop to terminate. Other errors are written to scrollback and
 // nil is returned — the prompt should keep going.
 func Dispatch(ctx context.Context, sess *Session, line string) error {
-	cmd, err := Parse(line)
+	cmd, err := parseWith(sess.registry(), line)
 	if err != nil {
 		Err(sess.Out, err)
 		return nil

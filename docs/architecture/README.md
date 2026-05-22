@@ -59,8 +59,10 @@ The docs go from **outside-in**: each file zooms one level deeper.
    every shipped verb and Cobra command, cross-linked to the
    `operationId` it calls.
 
-Phases 13–14 of [TODO.md](../../TODO.md) are not yet shipped; their
-slots in this doc set will fill in as the work lands.
+The player surface (Phases 0–13) and the admin auth & shell foundation
+(Phase 14) have shipped. The remaining admin verbs (Phases 15–18) and
+packaging (Phase 19) of [TODO.md](../../TODO.md) are not yet shipped;
+their slots in this doc set will fill in as the work lands.
 
 ---
 
@@ -166,15 +168,15 @@ renders.
 
 ## What is _not_ here
 
-- **Phases 12–14** — wonders, archive/hall-of-fame, packaging.
-  None shipped yet; their docs will land with the work. (Phase 10
-  shipped — see [05-verbs.md](05-verbs.md) "expeditions.go" and
-  [commands-reference.md](commands-reference.md) "Phase 10". Phase 11
-  shipped — see [05-verbs.md](05-verbs.md) "trade/" and
-  [commands-reference.md](commands-reference.md) "Phase 11".)
-- **Admin surface** — explicitly out of scope for v1. The
-  `bearerSource.AdminBearer` security source returns an error rather
-  than sending an empty token.
+- **Admin game verbs (Phases 15–18)** — admin server/world/team
+  management. Phase 14 shipped the admin *foundation* (auth, the
+  `dun-admin>` shell, resolvers) — see
+  [03-auth-and-config.md](03-auth-and-config.md) "Admin scope",
+  [04-repl-shell.md](04-repl-shell.md) "The mode discriminator" and
+  [commands-reference.md](commands-reference.md) "Admin track". The
+  Phase 15–18 verbs land in `internal/tui/verbs/admin/` as they ship.
+- **Packaging (Phase 19)** — GoReleaser, Homebrew/Scoop, releases.
+  Not shipped; its docs land with the work.
 - **Backend internals** — see the upstream
   [docs/backend/](../backend/) mirror and the dun backend repo.
 
