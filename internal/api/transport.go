@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -114,4 +115,135 @@ func parseRateLimit(resp *http.Response, requestID string) *RateLimitError {
 		Err:        base,
 		RetryAfter: time.Duration(retryAfter) * time.Second,
 	}
+}
+
+// debugLogTransport logs full request and response payloads at
+// slog.LevelDebug. When the active slog handler is not at debug, it is a
+// zero-cost passthrough — no body buffering, no header copying.
+//
+// The Authorization header value is redacted in logged headers; body
+// contents (including any sensitive JSON fields) are emitted verbatim,
+// since enabling debug is an explicit opt-in.
+type debugLogTransport struct {
+	base http.RoundTripper
+}
+
+// RoundTrip implements http.RoundTripper.
+func (t *debugLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	logger := slog.Default()
+	if !logger.Enabled(req.Context(), slog.LevelDebug) {
+		return base.RoundTrip(req)
+	}
+
+	reqBody, err := captureRequestBody(req)
+	if err != nil {
+		// Don't fail the request because we couldn't capture the body
+		// for logging — surface the read error in the log instead.
+		logger.LogAttrs(req.Context(), slog.LevelDebug, "http request body capture failed",
+			slog.String("method", req.Method),
+			slog.String("url", req.URL.String()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	logger.LogAttrs(req.Context(), slog.LevelDebug, "http request",
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.Any("headers", redactHeaders(req.Header)),
+		slog.String("body", string(reqBody)),
+	)
+
+	start := time.Now()
+	resp, err := base.RoundTrip(req)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		logger.LogAttrs(req.Context(), slog.LevelDebug, "http response error",
+			slog.String("method", req.Method),
+			slog.String("url", req.URL.String()),
+			slog.Int64("duration_ms", elapsed.Milliseconds()),
+			slog.String("error", err.Error()),
+		)
+		return resp, err
+	}
+
+	respBody, bodyErr := captureResponseBody(resp)
+	if bodyErr != nil {
+		logger.LogAttrs(req.Context(), slog.LevelDebug, "http response body capture failed",
+			slog.String("method", req.Method),
+			slog.String("url", req.URL.String()),
+			slog.String("error", bodyErr.Error()),
+		)
+	}
+
+	logger.LogAttrs(req.Context(), slog.LevelDebug, "http response",
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.Int("status", resp.StatusCode),
+		slog.String("request_id", resp.Header.Get("X-Request-Id")),
+		slog.Any("headers", redactHeaders(resp.Header)),
+		slog.String("body", string(respBody)),
+		slog.Int64("duration_ms", elapsed.Milliseconds()),
+	)
+
+	return resp, nil
+}
+
+// captureRequestBody drains req.Body, restores it with a re-readable
+// reader, and also sets req.GetBody so the inner transport can replay
+// the body on redirects or retries.
+func captureRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil, nil
+	}
+	buf, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		req.Body = io.NopCloser(bytes.NewReader(nil))
+		return nil, err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(buf))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(buf)), nil
+	}
+	return buf, nil
+}
+
+// captureResponseBody drains resp.Body and restores it with a
+// re-readable reader so downstream decoders see the bytes untouched.
+func captureResponseBody(resp *http.Response) ([]byte, error) {
+	if resp.Body == nil {
+		return nil, nil
+	}
+	buf, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(nil))
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(buf))
+	return buf, nil
+}
+
+// redactHeaders returns a shallow copy of h with the Authorization
+// header value replaced by "[REDACTED]". It uses http.Header's
+// canonical-case lookup so it catches "authorization", "AUTHORIZATION",
+// etc.
+func redactHeaders(h http.Header) http.Header {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(http.Header, len(h))
+	for k, v := range h {
+		out[k] = v
+	}
+	if out.Get("Authorization") != "" {
+		out.Set("Authorization", "[REDACTED]")
+	}
+	return out
 }

@@ -79,6 +79,17 @@ dun --log-level debug
 Levels: `debug`, `info` (default), `warn`, `error`. Log output is
 written to `~/.dun/dun-cli.log` as JSON, never to your terminal.
 
+At `--log-level debug`, every backend HTTP request and response is
+recorded in full — method, URL with query parameters, request body,
+status, response body, request ID, and duration. The `Authorization`
+header is redacted, but body contents are not, so debug logs may
+contain values you'd treat as sensitive (e.g., session tokens echoed
+back during login). View a response body with:
+
+```
+jq 'select(.msg=="http response") | .body | fromjson' ~/.dun/dun-cli.log
+```
+
 ## 4. First login
 
 Authenticate with a magic-link email:

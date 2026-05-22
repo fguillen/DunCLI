@@ -55,7 +55,7 @@ func New(baseURL string, tp TokenProvider, hc *http.Client) (*Client, error) {
 		clone := *hc
 		hc = &clone
 	}
-	hc.Transport = &requestIDTransport{base: hc.Transport}
+	hc.Transport = &debugLogTransport{base: &requestIDTransport{base: hc.Transport}}
 
 	gc, err := gen.NewClient(baseURL, bearerSource{tp: tp}, gen.WithClient(hc))
 	if err != nil {
