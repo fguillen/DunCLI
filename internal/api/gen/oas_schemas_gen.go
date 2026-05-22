@@ -2415,19 +2415,88 @@ func (*ErrorEnvelope) requestAdminMagicLinkRes()   {}
 func (*ErrorEnvelope) requestPlayerMagicLinkRes()  {}
 
 type ErrorEnvelopeError struct {
-	// Stable code. Known values:
-	// `unauthorized`, `invalid_token`, `expired`,
-	// `already_consumed`, `forbidden`, `not_found`,
-	// `last_admin`, `handle_locked`, `invalid`,
-	// `param_missing`.
-	Code    ErrorEnvelopeErrorCode `json:"code"`
-	Message string                 `json:"message"`
+	// Stable, machine-readable error code. This list is non-exhaustive
+	// and grows as the API evolves — clients MUST treat an unrecognized
+	// code as a generic failure (fall back to `message`) rather than
+	// failing to decode the response.
+	// Known codes:
+	// **Authentication & authorization**
+	// - `unauthorized` — missing, invalid, or wrong-scope API key
+	// - `invalid_token` — magic-link token is not recognized
+	// - `expired` — magic-link token has expired
+	// - `already_consumed` — magic-link token was already used
+	// - `forbidden` — authenticated but not allowed to access this resource
+	// **Request validation**
+	// - `not_found` — resource does not exist or is not visible to the caller
+	// - `invalid` — request body or parameters failed validation
+	// - `param_missing` — a required parameter was absent
+	// **Server membership**
+	// - `handle_locked` — player handle cannot be changed during an active round
+	// - `handle_not_set` — player has joined the server but not yet chosen a handle
+	// - `last_admin` — cannot remove the only remaining server admin
+	// **World lifecycle (admin)**
+	// - `concurrent_world_limit_reached` — server already has the maximum active worlds
+	// - `world_not_configurable` — world is past the stage where it can be configured
+	// - `world_not_startable` — world is not in a state that can be started
+	// - `world_not_cancellable` — world is not in a state that can be cancelled
+	// **Joining a world (player)**
+	// - `world_not_joinable` — world is not accepting new kingdoms
+	// - `world_account_limit_reached` — account already holds the maximum kingdoms in this world
+	// - `no_spawn_slot` — no free spawn location is available on the map
+	// **Kingdom, buildings & build queue**
+	// - `kingdom_eliminated` — kingdom has been eliminated and can no longer act
+	// - `world_not_buildable` — world is not in a state that permits building or training
+	// - `insufficient_resources` — kingdom lacks the resources for this action
+	// - `queue_full` — the build queue is already full
+	// - `unknown_building` — the named building kind does not exist
+	// - `invalid_target_level` — requested building level is not a valid upgrade target
+	// - `tier_gate_unmet` — a prerequisite tier requirement is not met
+	// - `build_order_already_resolved` — build order already completed; cannot be cancelled
+	// **Unit training**
+	// - `unknown_unit` — the named unit kind does not exist
+	// - `building_missing` — the required training building is not present
+	// - `invalid_building_kind` — the building cannot train units
+	// - `unit_not_trainable_here` — the unit cannot be trained in this building
+	// - `invalid_count` — requested unit count is not valid
+	// - `training_order_already_resolved` — training order already completed; cannot be cancelled
+	// **Armies, marches & combat**
+	// - `invalid_army` — the referenced army is invalid
+	// - `army_empty` — the army has no units
+	// - `army_not_home` — the army is not at its home location
+	// - `name_taken` — an army with that name already exists
+	// - `empty_split` — the split would leave a side with no units
+	// - `insufficient_units` — the army lacks the requested units
+	// - `incompatible_armies` — the armies cannot be merged
+	// - `invalid_intent` — the march intent is not valid
+	// - `unreachable` — the destination cannot be reached
+	// - `cross_world` — origin and destination are in different worlds
+	// - `world_not_active` — the world is not in its active phase
+	// - `march_already_resolved` — the march has already arrived; cannot be recalled
+	// **Trade & caravans**
+	// - `invalid_payload` — the caravan payload is not valid
+	// - `insufficient_capacity` — the escort cannot carry the payload
+	// - `empty_escort` — the caravan has no escort units
+	// - `self_trade` — sender and receiver are the same kingdom
+	// - `receiver_not_found` — the target kingdom does not exist
+	// - `receiver_eliminated` — the target kingdom has been eliminated
+	// **Wonders**
+	// - `unknown_wonder_name` — the named wonder does not exist
+	// - `wonder_prereq_unmet` — a prerequisite for this wonder is not met
+	// - `wonder_already_active` — the wonder is already in progress
+	// - `no_milestone_pending` — no wonder milestone is awaiting payment
+	// - `milestone_already_paid` — this milestone has already been paid
+	// - `wrong_milestone_percent` — payment does not match the pending milestone
+	// - `invalid_amount` — the contribution amount is not valid
+	// - `wonder_not_repairable` — the wonder is not in a repairable state
+	// - `repair_cap_reached` — the wonder repair cap for the period has been reached.
+	Code    string `json:"code"`
+	Message string `json:"message"`
 	// Seconds until the caller may retry (rate-limit responses only).
 	RetryAfter OptInt `json:"retry_after"`
 }
 
 // GetCode returns the value of Code.
-func (s *ErrorEnvelopeError) GetCode() ErrorEnvelopeErrorCode {
+func (s *ErrorEnvelopeError) GetCode() string {
 	return s.Code
 }
 
@@ -2442,7 +2511,7 @@ func (s *ErrorEnvelopeError) GetRetryAfter() OptInt {
 }
 
 // SetCode sets the value of Code.
-func (s *ErrorEnvelopeError) SetCode(val ErrorEnvelopeErrorCode) {
+func (s *ErrorEnvelopeError) SetCode(val string) {
 	s.Code = val
 }
 
@@ -2454,108 +2523,6 @@ func (s *ErrorEnvelopeError) SetMessage(val string) {
 // SetRetryAfter sets the value of RetryAfter.
 func (s *ErrorEnvelopeError) SetRetryAfter(val OptInt) {
 	s.RetryAfter = val
-}
-
-// Stable code. Known values:
-// `unauthorized`, `invalid_token`, `expired`,
-// `already_consumed`, `forbidden`, `not_found`,
-// `last_admin`, `handle_locked`, `invalid`,
-// `param_missing`.
-type ErrorEnvelopeErrorCode string
-
-const (
-	ErrorEnvelopeErrorCodeUnauthorized    ErrorEnvelopeErrorCode = "unauthorized"
-	ErrorEnvelopeErrorCodeInvalidToken    ErrorEnvelopeErrorCode = "invalid_token"
-	ErrorEnvelopeErrorCodeExpired         ErrorEnvelopeErrorCode = "expired"
-	ErrorEnvelopeErrorCodeAlreadyConsumed ErrorEnvelopeErrorCode = "already_consumed"
-	ErrorEnvelopeErrorCodeForbidden       ErrorEnvelopeErrorCode = "forbidden"
-	ErrorEnvelopeErrorCodeNotFound        ErrorEnvelopeErrorCode = "not_found"
-	ErrorEnvelopeErrorCodeLastAdmin       ErrorEnvelopeErrorCode = "last_admin"
-	ErrorEnvelopeErrorCodeHandleLocked    ErrorEnvelopeErrorCode = "handle_locked"
-	ErrorEnvelopeErrorCodeInvalid         ErrorEnvelopeErrorCode = "invalid"
-	ErrorEnvelopeErrorCodeParamMissing    ErrorEnvelopeErrorCode = "param_missing"
-)
-
-// AllValues returns all ErrorEnvelopeErrorCode values.
-func (ErrorEnvelopeErrorCode) AllValues() []ErrorEnvelopeErrorCode {
-	return []ErrorEnvelopeErrorCode{
-		ErrorEnvelopeErrorCodeUnauthorized,
-		ErrorEnvelopeErrorCodeInvalidToken,
-		ErrorEnvelopeErrorCodeExpired,
-		ErrorEnvelopeErrorCodeAlreadyConsumed,
-		ErrorEnvelopeErrorCodeForbidden,
-		ErrorEnvelopeErrorCodeNotFound,
-		ErrorEnvelopeErrorCodeLastAdmin,
-		ErrorEnvelopeErrorCodeHandleLocked,
-		ErrorEnvelopeErrorCodeInvalid,
-		ErrorEnvelopeErrorCodeParamMissing,
-	}
-}
-
-// MarshalText implements encoding.TextMarshaler.
-func (s ErrorEnvelopeErrorCode) MarshalText() ([]byte, error) {
-	switch s {
-	case ErrorEnvelopeErrorCodeUnauthorized:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeInvalidToken:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeExpired:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeAlreadyConsumed:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeForbidden:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeNotFound:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeLastAdmin:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeHandleLocked:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeInvalid:
-		return []byte(s), nil
-	case ErrorEnvelopeErrorCodeParamMissing:
-		return []byte(s), nil
-	default:
-		return nil, errors.Errorf("invalid value: %q", s)
-	}
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (s *ErrorEnvelopeErrorCode) UnmarshalText(data []byte) error {
-	switch ErrorEnvelopeErrorCode(data) {
-	case ErrorEnvelopeErrorCodeUnauthorized:
-		*s = ErrorEnvelopeErrorCodeUnauthorized
-		return nil
-	case ErrorEnvelopeErrorCodeInvalidToken:
-		*s = ErrorEnvelopeErrorCodeInvalidToken
-		return nil
-	case ErrorEnvelopeErrorCodeExpired:
-		*s = ErrorEnvelopeErrorCodeExpired
-		return nil
-	case ErrorEnvelopeErrorCodeAlreadyConsumed:
-		*s = ErrorEnvelopeErrorCodeAlreadyConsumed
-		return nil
-	case ErrorEnvelopeErrorCodeForbidden:
-		*s = ErrorEnvelopeErrorCodeForbidden
-		return nil
-	case ErrorEnvelopeErrorCodeNotFound:
-		*s = ErrorEnvelopeErrorCodeNotFound
-		return nil
-	case ErrorEnvelopeErrorCodeLastAdmin:
-		*s = ErrorEnvelopeErrorCodeLastAdmin
-		return nil
-	case ErrorEnvelopeErrorCodeHandleLocked:
-		*s = ErrorEnvelopeErrorCodeHandleLocked
-		return nil
-	case ErrorEnvelopeErrorCodeInvalid:
-		*s = ErrorEnvelopeErrorCodeInvalid
-		return nil
-	case ErrorEnvelopeErrorCodeParamMissing:
-		*s = ErrorEnvelopeErrorCodeParamMissing
-		return nil
-	default:
-		return errors.Errorf("invalid value: %q", data)
-	}
 }
 
 type ExchangeAdminMagicLinkReq struct {
@@ -6671,6 +6638,7 @@ func (s *PlayerProfileRead) SetJoinedAt(val time.Time) {
 	s.JoinedAt = val
 }
 
+func (*PlayerProfileRead) showOwnProfileRes()    {}
 func (*PlayerProfileRead) showPlayerProfileRes() {}
 
 // Returned by `PATCH /servers/{id}/me`.
@@ -8429,6 +8397,14 @@ func (*ShowNodeOK) showNodeRes() {}
 type ShowNodeUnauthorized ErrorEnvelope
 
 func (*ShowNodeUnauthorized) showNodeRes() {}
+
+type ShowOwnProfileNotFound ErrorEnvelope
+
+func (*ShowOwnProfileNotFound) showOwnProfileRes() {}
+
+type ShowOwnProfileUnauthorized ErrorEnvelope
+
+func (*ShowOwnProfileUnauthorized) showOwnProfileRes() {}
 
 type ShowPlayerProfileForbidden ErrorEnvelope
 

@@ -241,6 +241,10 @@ type ShowNodeRes interface {
 	showNodeRes()
 }
 
+type ShowOwnProfileRes interface {
+	showOwnProfileRes()
+}
+
 type ShowPlayerProfileRes interface {
 	showPlayerProfileRes()
 }

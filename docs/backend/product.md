@@ -2,7 +2,7 @@
 
 `dun` (from Gaelic for an ancient or medieval fort) is an async multiplayer, console-native, medieval-fantasy strategy game. It is designed to fit a developer's workday — short check-ins of 30 seconds to 5 minutes, 1 to 10 times a day — and to function as a continuous, low-effort team-building mechanism for coworkers in the same company.
 
-This document is a high-level product summary. The full design lives in [docs/dun Game Design Document.v3.md](docs/dun%20Game%20Design%20Document.v3.md); section references like `§17.1` point at that doc. The implementation roadmap is in [TODO.md](TODO.md). The HTTP API surface is in [docs/openapi.yaml](docs/openapi.yaml).
+This document is a high-level product summary. The full design lives in [docs/dun Game Design Document.v3.md](docs/dun%20Game%20Design%20Document.v3.md); section references like `§17.1` point at that doc. The implementation roadmap is in [TODO.md](TODO.md). The HTTP API surface is in [docs/openapi.yaml](docs/openapi.yaml), with a hands-on walkthrough in [docs/tutorial.md](docs/tutorial.md).
 
 ---
 

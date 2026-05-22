@@ -277,6 +277,11 @@ type ShowNodeParams struct {
 	ID      string
 }
 
+// ShowOwnProfileParams is parameters of showOwnProfile operation.
+type ShowOwnProfileParams struct {
+	ID string
+}
+
 // ShowPlayerProfileParams is parameters of showPlayerProfile operation.
 type ShowPlayerProfileParams struct {
 	ServerId string

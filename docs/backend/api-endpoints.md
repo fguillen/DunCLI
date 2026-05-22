@@ -43,6 +43,7 @@ See [02-identity-and-servers.md](02-identity-and-servers.md).
 |---|---|---|---|
 | GET | `/v1/servers` | — | servers admitting this player |
 | POST | `/v1/servers/:id/join` | — | explicit join for invite-only servers |
+| GET | `/v1/servers/:id/me` | — | the caller's own per-server profile; 404 `handle_not_set` until a handle is chosen |
 | PATCH | `/v1/servers/:id/me` | `Players::SetHandle`, `Players::SetRealName` | set per-server handle / real name; handle locked during active round; retired handles unavailable for 30 days |
 | GET | `/v1/servers/:server_id/players/:handle` | — | view another player's profile on this server; serializer includes inline `title` (Phase 10) |
 | GET | `/v1/servers/:id/hall-of-fame` | — | four leaderboard snapshots (Champions/Wreckers/Warlords/Veterans); `?kind=` filter (Phase 10) |

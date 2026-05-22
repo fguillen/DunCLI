@@ -317,6 +317,35 @@ paths:
   /servers/{id}/me:
     parameters:
       - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: showOwnProfile
+      tags: [Player profile]
+      summary: Show the current player's profile for this server
+      description: |
+        Returns the authenticated player's own per-server profile — the
+        same `PlayerProfileRead` shape as `showPlayerProfile`, including
+        `joined_at`.
+
+        A `404` is returned when the caller has joined the server but not
+        yet chosen a handle (`handle_not_set`) — a `PlayerProfileRead`
+        cannot be formed without one — or when the caller has no profile
+        on this server at all (`not_found`).
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: Profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerProfileRead" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No handle set yet, or no profile on this server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              examples:
+                handle_not_set: { value: { error: { code: handle_not_set, message: "You haven't set a handle on this server yet." } } }
+                not_found:      { value: { error: { code: not_found,      message: "You have not joined this server" } } }
     patch:
       operationId: updateOwnProfile
       tags: [Player profile]
@@ -325,10 +354,10 @@ paths:
         Updates the current player's per-server profile.
 
         `handle` rules (§17.1):
-        - Length 3–20.
-        - Must start with a letter.
-        - Allowed characters: `a-zA-Z0-9_` plus single internal spaces.
-        - No leading, trailing, or consecutive spaces.
+        - 3–24 characters.
+        - Allowed characters: `A-Za-z`, `0-9`, `_`, `-` — regex
+          `^[A-Za-z0-9_-]{3,24}$`.
+        - No spaces.
         - Reserved (case-insensitive): `admin`, `system`, `dun`, `world`,
           `neutral`, `wilderness`, `server`, `anonymous`, `none`, `null`.
         - Case-preserved on display, case-insensitive for uniqueness
@@ -345,7 +374,7 @@ paths:
             schema:
               type: object
               properties:
-                handle:    { type: string, minLength: 3, maxLength: 20, example: IronFist }
+                handle:    { type: string, pattern: '^[A-Za-z0-9_-]{3,24}$', minLength: 3, maxLength: 24, example: IronFist }
                 real_name: { type: string, minLength: 1, maxLength: 60, example: "Alice Example" }
       responses:
         "200":
@@ -2281,22 +2310,91 @@ components:
             code:
               type: string
               description: |
-                Stable code. Known values:
-                `unauthorized`, `invalid_token`, `expired`,
-                `already_consumed`, `forbidden`, `not_found`,
-                `last_admin`, `handle_locked`, `invalid`,
-                `param_missing`.
-              enum:
-                - unauthorized
-                - invalid_token
-                - expired
-                - already_consumed
-                - forbidden
-                - not_found
-                - last_admin
-                - handle_locked
-                - invalid
-                - param_missing
+                Stable, machine-readable error code. This list is non-exhaustive
+                and grows as the API evolves — clients MUST treat an unrecognized
+                code as a generic failure (fall back to `message`) rather than
+                failing to decode the response.
+
+                Known codes:
+
+                **Authentication & authorization**
+                - `unauthorized` — missing, invalid, or wrong-scope API key
+                - `invalid_token` — magic-link token is not recognized
+                - `expired` — magic-link token has expired
+                - `already_consumed` — magic-link token was already used
+                - `forbidden` — authenticated but not allowed to access this resource
+
+                **Request validation**
+                - `not_found` — resource does not exist or is not visible to the caller
+                - `invalid` — request body or parameters failed validation
+                - `param_missing` — a required parameter was absent
+
+                **Server membership**
+                - `handle_locked` — player handle cannot be changed during an active round
+                - `handle_not_set` — player has joined the server but not yet chosen a handle
+                - `last_admin` — cannot remove the only remaining server admin
+
+                **World lifecycle (admin)**
+                - `concurrent_world_limit_reached` — server already has the maximum active worlds
+                - `world_not_configurable` — world is past the stage where it can be configured
+                - `world_not_startable` — world is not in a state that can be started
+                - `world_not_cancellable` — world is not in a state that can be cancelled
+
+                **Joining a world (player)**
+                - `world_not_joinable` — world is not accepting new kingdoms
+                - `world_account_limit_reached` — account already holds the maximum kingdoms in this world
+                - `no_spawn_slot` — no free spawn location is available on the map
+
+                **Kingdom, buildings & build queue**
+                - `kingdom_eliminated` — kingdom has been eliminated and can no longer act
+                - `world_not_buildable` — world is not in a state that permits building or training
+                - `insufficient_resources` — kingdom lacks the resources for this action
+                - `queue_full` — the build queue is already full
+                - `unknown_building` — the named building kind does not exist
+                - `invalid_target_level` — requested building level is not a valid upgrade target
+                - `tier_gate_unmet` — a prerequisite tier requirement is not met
+                - `build_order_already_resolved` — build order already completed; cannot be cancelled
+
+                **Unit training**
+                - `unknown_unit` — the named unit kind does not exist
+                - `building_missing` — the required training building is not present
+                - `invalid_building_kind` — the building cannot train units
+                - `unit_not_trainable_here` — the unit cannot be trained in this building
+                - `invalid_count` — requested unit count is not valid
+                - `training_order_already_resolved` — training order already completed; cannot be cancelled
+
+                **Armies, marches & combat**
+                - `invalid_army` — the referenced army is invalid
+                - `army_empty` — the army has no units
+                - `army_not_home` — the army is not at its home location
+                - `name_taken` — an army with that name already exists
+                - `empty_split` — the split would leave a side with no units
+                - `insufficient_units` — the army lacks the requested units
+                - `incompatible_armies` — the armies cannot be merged
+                - `invalid_intent` — the march intent is not valid
+                - `unreachable` — the destination cannot be reached
+                - `cross_world` — origin and destination are in different worlds
+                - `world_not_active` — the world is not in its active phase
+                - `march_already_resolved` — the march has already arrived; cannot be recalled
+
+                **Trade & caravans**
+                - `invalid_payload` — the caravan payload is not valid
+                - `insufficient_capacity` — the escort cannot carry the payload
+                - `empty_escort` — the caravan has no escort units
+                - `self_trade` — sender and receiver are the same kingdom
+                - `receiver_not_found` — the target kingdom does not exist
+                - `receiver_eliminated` — the target kingdom has been eliminated
+
+                **Wonders**
+                - `unknown_wonder_name` — the named wonder does not exist
+                - `wonder_prereq_unmet` — a prerequisite for this wonder is not met
+                - `wonder_already_active` — the wonder is already in progress
+                - `no_milestone_pending` — no wonder milestone is awaiting payment
+                - `milestone_already_paid` — this milestone has already been paid
+                - `wrong_milestone_percent` — payment does not match the pending milestone
+                - `invalid_amount` — the contribution amount is not valid
+                - `wonder_not_repairable` — the wonder is not in a repairable state
+                - `repair_cap_reached` — the wonder repair cap for the period has been reached
             message: { type: string }
             retry_after:
               type: integer

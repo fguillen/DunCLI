@@ -7,6 +7,7 @@
 - **Product overview** — [PRODUCT.md](PRODUCT.md): what the game is, who it's for, core mechanics at a glance.
 - **Game design (source of truth)** — [docs/dun Game Design Document.v3.md](docs/dun%20Game%20Design%20Document.v3.md).
 - **HTTP API contract** — [docs/openapi.yaml](docs/openapi.yaml): OpenAPI 3.1 spec for everything implemented so far.
+- **API tutorial** — [docs/tutorial.md](docs/tutorial.md): hands-on walkthrough of the API from the Admin and Player perspectives.
 - **Backend architecture** — [docs/architecture/README.md](docs/architecture/README.md): system overview and per-phase chapters.
 - **Implementation roadmap** — [TODO.md](TODO.md).
 - **Contributor guide** — [CLAUDE.md](CLAUDE.md): conventions, workflow, code style.

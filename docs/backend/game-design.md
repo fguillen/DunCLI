@@ -2183,10 +2183,9 @@ How players log in, what an identity is, how handles and real names work, and ho
 
 **Handle constraints**
 
-- 3-20 characters  
-- Allowed: letters (a-z, A-Z), digits (0-9), underscore, single internal spaces  
-- Must start with a letter  
-- No leading, trailing, or consecutive spaces  
+- 3-24 characters  
+- Allowed: letters (a-z, A-Z), digits (0-9), underscore, hyphen — regex `^[A-Za-z0-9_-]{3,24}$`  
+- No spaces  
 - Case-preserved on display, case-insensitive for uniqueness checks ("IronFist" and "ironfist" collide)  
 - Reserved handles blocked: `admin`, `system`, `dun`, `world`, `neutral`, `wilderness`, `server`, `anonymous`, `none`, `null`  
 - Unique per server (not globally)

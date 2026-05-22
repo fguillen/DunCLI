@@ -67,6 +67,7 @@ const (
 	ShowBattleOperation              OperationName = "ShowBattle"
 	ShowKingdomOperation             OperationName = "ShowKingdom"
 	ShowNodeOperation                OperationName = "ShowNode"
+	ShowOwnProfileOperation          OperationName = "ShowOwnProfile"
 	ShowPlayerProfileOperation       OperationName = "ShowPlayerProfile"
 	ShowRegionOperation              OperationName = "ShowRegion"
 	ShowRegionAdjacentOperation      OperationName = "ShowRegionAdjacent"

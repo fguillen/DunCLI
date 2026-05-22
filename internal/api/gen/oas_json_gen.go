@@ -5610,7 +5610,7 @@ func (s *ErrorEnvelopeError) Encode(e *jx.Encoder) {
 func (s *ErrorEnvelopeError) encodeFields(e *jx.Encoder) {
 	{
 		e.FieldStart("code")
-		s.Code.Encode(e)
+		e.Str(s.Code)
 	}
 	{
 		e.FieldStart("message")
@@ -5642,7 +5642,9 @@ func (s *ErrorEnvelopeError) Decode(d *jx.Decoder) error {
 		case "code":
 			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				if err := s.Code.Decode(d); err != nil {
+				v, err := d.Str()
+				s.Code = string(v)
+				if err != nil {
 					return err
 				}
 				return nil
@@ -5723,62 +5725,6 @@ func (s *ErrorEnvelopeError) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ErrorEnvelopeError) UnmarshalJSON(data []byte) error {
-	d := jx.DecodeBytes(data)
-	return s.Decode(d)
-}
-
-// Encode encodes ErrorEnvelopeErrorCode as json.
-func (s ErrorEnvelopeErrorCode) Encode(e *jx.Encoder) {
-	e.Str(string(s))
-}
-
-// Decode decodes ErrorEnvelopeErrorCode from json.
-func (s *ErrorEnvelopeErrorCode) Decode(d *jx.Decoder) error {
-	if s == nil {
-		return errors.New("invalid: unable to decode ErrorEnvelopeErrorCode to nil")
-	}
-	v, err := d.StrBytes()
-	if err != nil {
-		return err
-	}
-	// Try to use constant string.
-	switch ErrorEnvelopeErrorCode(v) {
-	case ErrorEnvelopeErrorCodeUnauthorized:
-		*s = ErrorEnvelopeErrorCodeUnauthorized
-	case ErrorEnvelopeErrorCodeInvalidToken:
-		*s = ErrorEnvelopeErrorCodeInvalidToken
-	case ErrorEnvelopeErrorCodeExpired:
-		*s = ErrorEnvelopeErrorCodeExpired
-	case ErrorEnvelopeErrorCodeAlreadyConsumed:
-		*s = ErrorEnvelopeErrorCodeAlreadyConsumed
-	case ErrorEnvelopeErrorCodeForbidden:
-		*s = ErrorEnvelopeErrorCodeForbidden
-	case ErrorEnvelopeErrorCodeNotFound:
-		*s = ErrorEnvelopeErrorCodeNotFound
-	case ErrorEnvelopeErrorCodeLastAdmin:
-		*s = ErrorEnvelopeErrorCodeLastAdmin
-	case ErrorEnvelopeErrorCodeHandleLocked:
-		*s = ErrorEnvelopeErrorCodeHandleLocked
-	case ErrorEnvelopeErrorCodeInvalid:
-		*s = ErrorEnvelopeErrorCodeInvalid
-	case ErrorEnvelopeErrorCodeParamMissing:
-		*s = ErrorEnvelopeErrorCodeParamMissing
-	default:
-		*s = ErrorEnvelopeErrorCode(v)
-	}
-
-	return nil
-}
-
-// MarshalJSON implements stdjson.Marshaler.
-func (s ErrorEnvelopeErrorCode) MarshalJSON() ([]byte, error) {
-	e := jx.Encoder{}
-	s.Encode(&e)
-	return e.Bytes(), nil
-}
-
-// UnmarshalJSON implements stdjson.Unmarshaler.
-func (s *ErrorEnvelopeErrorCode) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -20778,6 +20724,82 @@ func (s *ShowNodeUnauthorized) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ShowNodeUnauthorized) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ShowOwnProfileNotFound as json.
+func (s *ShowOwnProfileNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*ErrorEnvelope)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ShowOwnProfileNotFound from json.
+func (s *ShowOwnProfileNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ShowOwnProfileNotFound to nil")
+	}
+	var unwrapped ErrorEnvelope
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ShowOwnProfileNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ShowOwnProfileNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ShowOwnProfileNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ShowOwnProfileUnauthorized as json.
+func (s *ShowOwnProfileUnauthorized) Encode(e *jx.Encoder) {
+	unwrapped := (*ErrorEnvelope)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ShowOwnProfileUnauthorized from json.
+func (s *ShowOwnProfileUnauthorized) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ShowOwnProfileUnauthorized to nil")
+	}
+	var unwrapped ErrorEnvelope
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ShowOwnProfileUnauthorized(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ShowOwnProfileUnauthorized) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ShowOwnProfileUnauthorized) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

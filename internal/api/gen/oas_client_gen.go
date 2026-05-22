@@ -518,6 +518,18 @@ type Invoker interface {
 	//
 	// GET /worlds/{world_id}/nodes/{id}
 	ShowNode(ctx context.Context, params ShowNodeParams) (ShowNodeRes, error)
+	// ShowOwnProfile invokes showOwnProfile operation.
+	//
+	// Returns the authenticated player's own per-server profile — the
+	// same `PlayerProfileRead` shape as `showPlayerProfile`, including
+	// `joined_at`.
+	// A `404` is returned when the caller has joined the server but not
+	// yet chosen a handle (`handle_not_set`) — a `PlayerProfileRead`
+	// cannot be formed without one — or when the caller has no profile
+	// on this server at all (`not_found`).
+	//
+	// GET /servers/{id}/me
+	ShowOwnProfile(ctx context.Context, params ShowOwnProfileParams) (ShowOwnProfileRes, error)
 	// ShowPlayerProfile invokes showPlayerProfile operation.
 	//
 	// Returns the per-server profile including the real name. Caller
@@ -581,10 +593,10 @@ type Invoker interface {
 	//
 	// Updates the current player's per-server profile.
 	// `handle` rules (§17.1):
-	// - Length 3–20.
-	// - Must start with a letter.
-	// - Allowed characters: `a-zA-Z0-9_` plus single internal spaces.
-	// - No leading, trailing, or consecutive spaces.
+	// - 3–24 characters.
+	// - Allowed characters: `A-Za-z`, `0-9`, `_`, `-` — regex
+	// `^[A-Za-z0-9_-]{3,24}$`.
+	// - No spaces.
 	// - Reserved (case-insensitive): `admin`, `system`, `dun`, `world`,
 	// `neutral`, `wilderness`, `server`, `anonymous`, `none`, `null`.
 	// - Case-preserved on display, case-insensitive for uniqueness
@@ -8492,6 +8504,138 @@ func (c *Client) sendShowNode(ctx context.Context, params ShowNodeParams) (res S
 	return result, nil
 }
 
+// ShowOwnProfile invokes showOwnProfile operation.
+//
+// Returns the authenticated player's own per-server profile — the
+// same `PlayerProfileRead` shape as `showPlayerProfile`, including
+// `joined_at`.
+// A `404` is returned when the caller has joined the server but not
+// yet chosen a handle (`handle_not_set`) — a `PlayerProfileRead`
+// cannot be formed without one — or when the caller has no profile
+// on this server at all (`not_found`).
+//
+// GET /servers/{id}/me
+func (c *Client) ShowOwnProfile(ctx context.Context, params ShowOwnProfileParams) (ShowOwnProfileRes, error) {
+	res, err := c.sendShowOwnProfile(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendShowOwnProfile(ctx context.Context, params ShowOwnProfileParams) (res ShowOwnProfileRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("showOwnProfile"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/servers/{id}/me"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ShowOwnProfileOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/servers/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/me"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:PlayerBearer"
+			switch err := c.securityPlayerBearer(ctx, ShowOwnProfileOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"PlayerBearer\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeShowOwnProfileResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ShowPlayerProfile invokes showPlayerProfile operation.
 //
 // Returns the per-server profile including the real name. Caller
@@ -9575,10 +9719,10 @@ func (c *Client) sendStartWorld(ctx context.Context, params StartWorldParams) (r
 //
 // Updates the current player's per-server profile.
 // `handle` rules (§17.1):
-// - Length 3–20.
-// - Must start with a letter.
-// - Allowed characters: `a-zA-Z0-9_` plus single internal spaces.
-// - No leading, trailing, or consecutive spaces.
+// - 3–24 characters.
+// - Allowed characters: `A-Za-z`, `0-9`, `_`, `-` — regex
+// `^[A-Za-z0-9_-]{3,24}$`.
+// - No spaces.
 // - Reserved (case-insensitive): `admin`, `system`, `dun`, `world`,
 // `neutral`, `wilderness`, `server`, `anonymous`, `none`, `null`.
 // - Case-preserved on display, case-insensitive for uniqueness

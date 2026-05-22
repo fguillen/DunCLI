@@ -104,6 +104,7 @@ var operationRolesPlayerBearer = map[string][]string{
 	ShowBattleOperation:           []string{},
 	ShowKingdomOperation:          []string{},
 	ShowNodeOperation:             []string{},
+	ShowOwnProfileOperation:       []string{},
 	ShowPlayerProfileOperation:    []string{},
 	ShowRegionOperation:           []string{},
 	ShowRegionAdjacentOperation:   []string{},

@@ -15,6 +15,7 @@ import (
 )
 
 var regexMap = map[string]ogenregex.Regexp{
+	"^[A-Za-z0-9_-]{3,24}$":             ogenregex.MustCompile("^[A-Za-z0-9_-]{3,24}$"),
 	"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$": ogenregex.MustCompile("^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"),
 }
 var (
