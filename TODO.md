@@ -13,16 +13,22 @@ rationale and [CLAUDE.md](CLAUDE.md) "Interaction model — REPL, not
 full-screen TUI" for implementation rules. Entity references are by
 name/slug, not ULID — see CLAUDE.md "Entity identification".
 
-**v1 scope is player surface only.** The following admin operationIds
-are explicitly **out of scope** for v1 and will be revisited later:
-`requestAdminMagicLink`, `exchangeAdminMagicLink`, `listAdminApiKeys`,
-`revokeAdminApiKey`, `listAdminServers`, `createServer`, `updateServer`,
-`deleteServer`, `listServerAdmins`, `inviteServerAdmin`,
-`revokeServerAdmin`, `listServerInvitations`, `createServerInvitation`,
-`deleteServerInvitation`, `listServerMembers`, `listAdminWorlds`,
-`proposeWorld`, `showAdminWorld`, `configureWorld`, `cancelWorld`,
-`startWorld`, `listWorldInvitations`, `createWorldInvitation`,
-`deleteWorldInvitation`, `listWorldBattles`.
+**Roadmap shape.** Phases 0–13 cover the **player surface** and ship
+first as v1. Phases 14–18 cover the **admin surface** (server CRUD,
+team / access management, world lifecycle, world invitations, admin
+battle log) and ship as the next track on top of v1. Phase 19 is
+packaging & distribution and is the final pre-release phase
+regardless of which track the binary carries.
+
+**Admin lives in a separate mode of the same binary.** `dun admin`
+drops the user into a dedicated `dun-admin>` REPL with its own verb
+set, its own credential entry (player and admin keys for the same
+email coexist via a `scope` discriminator in `~/.dun/credentials`),
+and its own session-context file at `~/.dun/admin-state.json`. The
+player `dun>` shell and the admin `dun-admin>` shell never share a
+process: scopes can't mix mid-session. See
+[PRODUCT.md](PRODUCT.md) "Interaction model" for the user-facing
+framing.
 
 ---
 
@@ -441,7 +447,157 @@ accounts but no flag distinguishing the two — a `tombstoned_at` (or
 `was_deleted: true`) field would let the CLI render `[deleted]`
 rather than `(deleted)` for both.
 
-## Phase 14 — Polish, packaging & distribution
+## Phase 14 — Admin auth & shell
+
+operationIds: `requestAdminMagicLink`, `exchangeAdminMagicLink`,
+`listAdminApiKeys`, `revokeAdminApiKey`.
+
+Foundational admin-track phase. No game endpoints — sets up the
+parallel `dun-admin>` REPL, admin-scope credential storage, and the
+admin entity resolvers that Phases 15–18 consume. Mirrors the Phase
+2 / Phase 3 architecture for the player surface.
+
+- [ ] `dun admin` cobra subcommand: enters a dedicated `dun-admin>`
+      REPL. No alt-screen; scrollback preserved. Either a sibling
+      `internal/tui/adminshell/` package or a `mode` discriminator
+      threaded through `internal/tui/` — picked at implementation
+      time so the shell scaffolding (dispatcher, completion engine,
+      selector / form primitives) is reused, not forked
+- [ ] `dun admin login` — `requestAdminMagicLink` →
+      `exchangePlayerMagicLink`-style token prompt →
+      `exchangeAdminMagicLink`; persists key to `~/.dun/credentials`
+      with a new `scope = "admin"` field so player and admin entries
+      keyed on the same `(base_url, email)` coexist without clobber
+- [ ] `dun admin logout` — `revokeAdminApiKey` for the current key,
+      removes the admin entry from `~/.dun/credentials`
+- [ ] `keys list` / `keys revoke <id>` inside the admin shell —
+      `listAdminApiKeys` / `revokeAdminApiKey`
+- [ ] Built-ins reused from the player shell: `help [verb]`,
+      `quit` / `exit`, `clear`, `version`, `whoami`, `where`
+- [ ] Connectivity probe: `getHealth` once on shell start; same
+      `backend unreachable: …` rendering as the player shell
+- [ ] Session context: in-scope `(admin server, admin world)`
+      persisted to a sibling `~/.dun/admin-state.json` (separate
+      file from `~/.dun/state.json` so player and admin contexts
+      can't overwrite each other); reloaded on shell start with
+      foreign-credential entries ignored
+- [ ] Admin resolvers in `internal/api`: `ResolveAdminServer(slug)`,
+      `ResolveAdminWorld(slug)` with per-session memoization +
+      `InvalidateAdminServers` / `InvalidateAdminWorlds` hooks.
+      Reuse the existing `gen.Client` — scope is selected by the
+      bearer token, not by a separate client instance
+- [ ] Tests: stubbed backend covering admin magic-link round-trip,
+      `~/.dun/credentials` round-trip with the new `scope` key
+      (including coexisting player+admin entries for the same
+      email), and `dun admin` vs `dun` shell isolation on startup
+
+## Phase 15 — Admin server CRUD
+
+operationIds: `listAdminServers`, `createServer`, `updateServer`,
+`deleteServer`.
+
+- [ ] `servers` — `listAdminServers`; renders the servers this admin
+      administers (slug, name, world counts, member counts where
+      surfaced)
+- [ ] `server show <slug>` — composed from `listAdminServers` since
+      the spec has no `showAdminServer`. Flagged as a backend
+      co-evolution candidate if the single-row projection becomes
+      too sparse for the detail view we want
+- [ ] `server create` — `huh` form for `name`, optional `slug`
+      (auto-derived if omitted per spec), `max_concurrent_worlds`,
+      `max_worlds_per_account`; preview block + `selector.Confirm`
+      before `createServer`
+- [ ] `server update <slug>` — same form pre-populated with current
+      values; only `name`, `max_concurrent_worlds`,
+      `max_worlds_per_account` are editable per the spec. Confirm
+      subtitle notes that limits apply at join time only (not
+      retroactive)
+- [ ] `server delete <slug>` — typed-name double-confirm
+      (`selector.Form` requiring verbatim slug entry) before
+      `deleteServer`; confirm subtitle enumerates the cascade
+      (adminships, memberships, accesses, profiles) so the operator
+      sees what's about to vanish
+- [ ] Session context: `server use <slug>` selects an in-scope admin
+      server for Phases 16–18; persisted to `~/.dun/admin-state.json`
+
+## Phase 16 — Admin server team & access
+
+operationIds: `listServerAdmins`, `inviteServerAdmin`,
+`revokeServerAdmin`, `listServerInvitations`,
+`createServerInvitation`, `deleteServerInvitation`,
+`listServerMembers`.
+
+- [ ] `admins` — `listServerAdmins` for the in-scope server
+      (includes owner per the spec)
+- [ ] `admin invite <email>` — `inviteServerAdmin`; idempotent on
+      email per the spec — find-or-creates the Admin record
+- [ ] `admin revoke <handle-or-id>` — `revokeServerAdmin`; relies on
+      the backend's last-admin 422 to render a useful error line.
+      `selector.Confirm` before firing
+- [ ] `invitations` — `listServerInvitations` (informational
+      invite-kind ServerAccess rows)
+- [ ] `invite <email>` — `createServerInvitation`; idempotent on
+      email per the spec
+- [ ] `invite revoke <email-or-id>` — `deleteServerInvitation`;
+      confirm subtitle clarifies that existing memberships are not
+      retroactively removed
+- [ ] `members` — `listServerMembers`; renders real names since
+      admins are authorized to see them per the spec
+- [ ] Backend co-evolution candidates: no `showServerAdmin` /
+      `showServerInvitation` in the spec — IDs must be sourced from
+      the corresponding list verbs. Flag if a detail view becomes
+      useful for one of these
+
+## Phase 17 — Admin world lifecycle
+
+operationIds: `listAdminWorlds`, `proposeWorld`, `showAdminWorld`,
+`configureWorld`, `cancelWorld`, `startWorld`.
+
+- [ ] `worlds` — `listAdminWorlds` for the in-scope server, across
+      all statuses (proposed / grace / live / cancelled / ended)
+- [ ] `world show <slug>` — `showAdminWorld` (admin detail
+      including enrollment counts, scheduled `t0_at`,
+      `auto_cancel_after_hours`, current status)
+- [ ] `world propose` — `huh` form for `name`, optional `slug`,
+      `min_players`, `t0_at` (RFC 3339 input + relative shortcuts
+      like `+72h`), `auto_cancel_after_hours`; preview block +
+      `selector.Confirm` before `proposeWorld`
+- [ ] `world configure <slug>` — pre-populated form; only `name`,
+      `min_players`, `t0_at`, `auto_cancel_after_hours` are editable
+      per the spec. Confirm subtitle calls out the StartJob
+      re-enqueue when `t0_at` changes
+- [ ] `world cancel <slug>` — typed-name double-confirm before
+      `cancelWorld`; relies on the backend's 422 if the world has
+      already started
+- [ ] `world start <slug>` — `startWorld` (force-start bypassing
+      `t0_at` + `min_players` thresholds); confirm subtitle calls
+      out the 72-hour grace anchor at call time per the spec
+- [ ] Session context: `world use <slug>` selects an in-scope admin
+      world for Phase 18; persisted to `~/.dun/admin-state.json`
+
+## Phase 18 — Admin world invitations & battles
+
+operationIds: `listWorldInvitations`, `createWorldInvitation`,
+`deleteWorldInvitation`, `listWorldBattles`.
+
+- [ ] `world invitations` — `listWorldInvitations` for the in-scope
+      world; confirm subtitle clarifies these are informational only
+      (ServerAccess controls actual admission per the spec)
+- [ ] `world invite <email>` — `createWorldInvitation`; idempotent
+      on email per the spec
+- [ ] `world invite revoke <email-or-id>` — `deleteWorldInvitation`
+- [ ] `battles [--limit N] [--offset N]` — `listWorldBattles`
+      (admin-scope variant of the Phase 9 player verb; reuses the
+      shared battle renderer from
+      [internal/tui/verbs/battles/](internal/tui/verbs/battles/)).
+      Server-side `limit` / `offset` per spec
+- [ ] Backend co-evolution candidates: the same
+      `attacker_handle` / `defender_handle` / `region_name`
+      enrichment gaps flagged in Phase 9 apply here — the admin
+      `battles` verb can't render more usefully than the player
+      `battles` verb until those land on the `Battle` schema
+
+## Phase 19 — Polish, packaging & distribution
 
 No new endpoints.
 

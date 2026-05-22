@@ -102,6 +102,39 @@ Scrollback is sacred — users will copy lines out of it.
   `world join 01JF7NQM…`. ULIDs appear in error toasts and the log
   file alongside `X-Request-Id` — never at the prompt.
 
+## Admin mode
+
+Server operators (the people who create servers, schedule worlds,
+invite players, and review the cross-world battle log) reach the
+backend's admin surface through the same binary, via a sibling
+entry:
+
+```
+$ dun admin login alice@example.com
+Magic link sent. Paste token: ************
+Welcome, admin.
+
+dun-admin> servers
+ *  acme           Acme Co               worlds: 2 live, 1 proposed
+dun-admin> server use acme
+dun-admin> world propose
+  ... form ...
+Proposed: spring-2026 — t0 in 71h 58m.
+dun-admin> quit
+$
+```
+
+The admin shell is the same shape as the player shell — REPL prompt,
+no alt-screen, tab completion, name/slug references, transient
+selectors for richer input — but it carries its own verb set, its
+own credential entry (admin and player keys for the same email
+coexist in `~/.dun/credentials` via a `scope` discriminator), and
+its own session-context file at `~/.dun/admin-state.json`. A single
+process is either a player shell or an admin shell, never both.
+This keeps blast radius narrow: an admin can't accidentally march
+an army while configuring world parameters, and a player can't
+accidentally invoke a destructive admin verb.
+
 ## UX principles
 
 1. **Launch fast, always.** Cold start is on the critical path. Defer
@@ -134,9 +167,11 @@ Scrollback is sacred — users will copy lines out of it.
 - No interactive map UI. `map` prints a text rendering; there is no
   arrow-key navigation, panning, or zoom. Region detail is a separate
   verb.
-- No admin surface. Server creation, world configuration, and player
-  management are out of scope; admins use the API directly (or a
-  separate tool, eventually).
+- No admin verbs inside the player shell. Server creation, world
+  configuration, and player management are real operations the CLI
+  supports — see "Admin mode" below — but they live in a separate
+  `dun-admin>` REPL reached via `dun admin`. Scopes never mix in one
+  session.
 
 ## Where this fits
 
