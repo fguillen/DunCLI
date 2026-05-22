@@ -67,6 +67,66 @@ func printTrainPreview(sess *shell.Session, p *gen.TrainingPreview) {
 	_, _ = fmt.Fprintf(sess.Out, "  max afford: %d\n", p.MaxAffordableCount)
 }
 
+// compactDuration renders a whole-second count as a short label
+// ("45s", "3m", "1m30s", "1h15m") for catalog tables.
+func compactDuration(seconds int) string {
+	switch {
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		m, s := seconds/60, seconds%60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm%ds", m, s)
+	default:
+		h, m := seconds/3600, (seconds%3600)/60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+}
+
+// printTrainCatalog renders `train preview` / `train preview <building>`:
+// one block per military building listing each trainable unit's per-unit
+// cost, per-unit training time, and the count the current stockpile
+// affords. Units the building can't currently train are tagged (locked).
+func printTrainCatalog(sess *shell.Session, c *gen.TrainingCatalog) {
+	if len(c.Buildings) == 0 {
+		shell.Section(sess.Out, "Training catalog:", "")
+		return
+	}
+	for i, b := range c.Buildings {
+		if i > 0 {
+			_, _ = fmt.Fprintln(sess.Out)
+		}
+		header := string(b.BuildingKind)
+		if b.BuildingBuilt {
+			header += fmt.Sprintf("  (L%d)", b.BuildingLevel)
+		} else {
+			header += "  (not built)"
+		}
+		shell.Strong(sess.Out, header)
+		if len(b.Units) == 0 {
+			_, _ = fmt.Fprintln(sess.Out, "  (no trainable units)")
+			continue
+		}
+		units := make([]gen.TrainingCatalogUnit, len(b.Units))
+		copy(units, b.Units)
+		sort.Slice(units, func(i, j int) bool { return string(units[i].Unit) < string(units[j].Unit) })
+		for _, u := range units {
+			line := fmt.Sprintf("  %-12s %-40s %7s   max %d",
+				string(u.Unit), stockpileString(u.PerUnitCost),
+				compactDuration(u.PerUnitSeconds), u.MaxAffordableCount)
+			if !u.Trainable {
+				line += "   (locked)"
+			}
+			_, _ = fmt.Fprintln(sess.Out, line)
+		}
+	}
+}
+
 // printArmy is the long form of one army for `army show`.
 func printArmy(sess *shell.Session, a *gen.Army, regionName string) {
 	shell.Strong(sess.Out, a.Name+"  ("+string(a.Status)+")")

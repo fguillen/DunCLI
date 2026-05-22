@@ -870,19 +870,43 @@ merged into Garrison: archer=3, levy=17
 If the invariants aren't met the backend returns a 422 wrapped in the
 standard `error: …` line.
 
-### `train preview <building> <unit> <count>`
+### `train preview [<building>] [<unit>] [<count>]`
 
-Previews the cost and duration of a training order without committing.
+Discover what you can train and what it costs. The verb adapts to how
+many arguments you give — nothing commits anything.
+
+With **no arguments** it prints a catalog for every military building:
+each trainable unit's per-unit cost, training time, and the count your
+current stockpile affords (`max`).
+
+```
+dun> train preview
+barracks  (L1)
+  levy         gold=20 wood=30 stone=0 iron=10              45s   max 18
+  archer       gold=30 wood=60 stone=0 iron=20            1m30s   max 9
+  pikeman      gold=40 wood=50 stone=10 iron=40              3m   max 6
+
+stable  (not built)
+  knight       gold=100 wood=20 stone=0 iron=80              4m   max 0   (locked)
+  scout        gold=50 wood=0 stone=0 iron=0                 1m   max 0   (locked)
+```
+
+A unit is tagged `(locked)` when its building isn't built yet or the
+unit can't be trained there. Pass a **building** to narrow the catalog
+to that one: `train preview barracks`.
+
+Give a **building and unit** for a single-unit preview, or add a
+**count** for the full order preview:
 
 ```
 dun> train preview barracks levy 10
 levy training preview
-  at:        barracks (L2)
+  at:        barracks (L1)
   count:     10
-  per-unit:  gold=10 wood=5 stone=0 iron=0 in 1m
-  total:     gold=100 wood=50 stone=0 iron=0 in 15m
+  per-unit:  gold=20 wood=30 stone=0 iron=10 in 45s
+  total:     gold=200 wood=300 stone=0 iron=100 in 7m
   affords:   yes
-  max afford: 20
+  max afford: 18
 ```
 
 Valid buildings: `barracks`, `stable`, `siege_workshop`. Valid units:

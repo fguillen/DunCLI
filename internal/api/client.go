@@ -853,6 +853,39 @@ func (c *Client) PreviewTrainingOrder(ctx context.Context, kingdomID, building, 
 	return out, err
 }
 
+// TrainingCatalog returns, for one military building or for all three,
+// the units it can train with per-unit cost, per-unit time, and the
+// count the kingdom's current stockpile affords. Pass an empty
+// `building` for all three buildings. Read-only — like the build and
+// train previews it commits nothing.
+func (c *Client) TrainingCatalog(ctx context.Context, kingdomID, building string) (*gen.TrainingCatalog, error) {
+	params := gen.TrainingCatalogParams{ID: kingdomID}
+	if building != "" {
+		params.Building = gen.NewOptTrainingCatalogBuilding(gen.TrainingCatalogBuilding(building))
+	}
+	var out *gen.TrainingCatalog
+	err := c.call(ctx, gen.TrainingCatalogOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.TrainingCatalog(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.TrainingCatalog:
+				out = v
+				return nil
+			case *gen.TrainingCatalogNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.TrainingCatalogUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.TrainingCatalogUnprocessableEntity:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.TrainingCatalogOperation, res)
+		},
+	)
+	return out, err
+}
+
 // QueueTrainingOrder enqueues `count` of `unit` at `building`. The
 // backend enforces per-building FIFO. On success the kingdom cache is
 // invalidated so the next `kingdom` reflects the deducted stockpile.

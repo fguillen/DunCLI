@@ -162,3 +162,105 @@ func TestSuggestActiveTrainingArgs_yieldsUnitsAndIDs(t *testing.T) {
 	require.Contains(t, got, "trn-1")
 	require.Contains(t, got, "trn-2")
 }
+
+// catalogJSON is a two-building TrainingCatalog fixture: a built
+// barracks and an unbuilt stable (its lone unit therefore (locked)).
+const catalogJSON = `{
+	"kingdom_id": "kgd-7",
+	"buildings": [
+		{"building_kind": "barracks", "building_built": true, "building_level": 2,
+		 "units": [
+			{"unit": "levy", "per_unit_cost": {"gold": 20, "wood": 30, "stone": 0, "iron": 10},
+			 "per_unit_seconds": 41, "max_affordable_count": 12, "trainable": true},
+			{"unit": "archer", "per_unit_cost": {"gold": 30, "wood": 60, "stone": 0, "iron": 20},
+			 "per_unit_seconds": 81, "max_affordable_count": 4, "trainable": true}
+		 ]},
+		{"building_kind": "stable", "building_built": false, "building_level": 0,
+		 "units": [
+			{"unit": "knight", "per_unit_cost": {"gold": 100, "wood": 20, "stone": 0, "iron": 80},
+			 "per_unit_seconds": 240, "max_affordable_count": 0, "trainable": false}
+		 ]}
+	]
+}`
+
+func TestRunTrainPreview_catalogAllBuildings(t *testing.T) {
+	var qp url.Values
+	extra := map[string]http.HandlerFunc{
+		"/v1/kingdoms/kgd-7/train/catalog": func(w http.ResponseWriter, r *http.Request) {
+			qp = r.URL.Query()
+			_, _ = w.Write([]byte(catalogJSON))
+		},
+	}
+	sess, out := setupMilitarySession(t, extra)
+	require.NoError(t, runTrainPreview(context.Background(), sess, nil, nil))
+	got := out.String()
+	require.Contains(t, got, "barracks  (L2)")
+	require.Contains(t, got, "stable  (not built)")
+	require.Contains(t, got, "levy")
+	require.Contains(t, got, "max 12")
+	require.Contains(t, got, "(locked)") // knight at an unbuilt stable
+	require.False(t, qp.Has("building"), "no-arg catalog must not filter by building")
+}
+
+func TestRunTrainPreview_catalogOneBuilding(t *testing.T) {
+	var qp url.Values
+	extra := map[string]http.HandlerFunc{
+		"/v1/kingdoms/kgd-7/train/catalog": func(w http.ResponseWriter, r *http.Request) {
+			qp = r.URL.Query()
+			_, _ = w.Write([]byte(catalogJSON))
+		},
+	}
+	sess, out := setupMilitarySession(t, extra)
+	require.NoError(t, runTrainPreview(context.Background(), sess, []string{"barracks"}, nil))
+	require.Contains(t, out.String(), "barracks  (L2)")
+	require.Equal(t, "barracks", qp.Get("building"))
+}
+
+func TestRunTrainPreview_singleUnitDefaultsCountToOne(t *testing.T) {
+	var qp url.Values
+	extra := map[string]http.HandlerFunc{
+		"/v1/kingdoms/kgd-7/train/preview": func(w http.ResponseWriter, r *http.Request) {
+			qp = r.URL.Query()
+			_, _ = w.Write([]byte(`{
+				"building_kind": "barracks", "unit": "archer", "count": 1,
+				"building_level": 2, "building_built": true, "unit_trainable_here": true,
+				"per_unit_cost": {"gold": 30, "wood": 60, "stone": 0, "iron": 20},
+				"total_cost": {"gold": 30, "wood": 60, "stone": 0, "iron": 20},
+				"per_unit_seconds": 81, "total_seconds": 81,
+				"affordable": true, "missing": {"gold": 0, "wood": 0, "stone": 0, "iron": 0},
+				"max_affordable_count": 4
+			}`))
+		},
+	}
+	sess, out := setupMilitarySession(t, extra)
+	require.NoError(t, runTrainPreview(context.Background(), sess, []string{"barracks", "archer"}, nil))
+	require.Contains(t, out.String(), "archer training preview")
+	require.Equal(t, "1", qp.Get("count"), "two-arg preview defaults count to 1")
+}
+
+func TestRunTrainPreview_rejectsUnknownBuilding(t *testing.T) {
+	sess, _ := setupMilitarySession(t, nil)
+	err := runTrainPreview(context.Background(), sess, []string{"bogus"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unknown building "bogus"`)
+}
+
+func TestCompactDuration(t *testing.T) {
+	cases := []struct {
+		seconds int
+		want    string
+	}{
+		{0, "0s"},
+		{41, "41s"},
+		{59, "59s"},
+		{60, "1m"},
+		{90, "1m30s"},
+		{180, "3m"},
+		{1200, "20m"},
+		{3600, "1h"},
+		{4500, "1h15m"},
+	}
+	for _, c := range cases {
+		require.Equalf(t, c.want, compactDuration(c.seconds), "compactDuration(%d)", c.seconds)
+	}
+}

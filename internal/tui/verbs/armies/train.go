@@ -42,8 +42,8 @@ func init() {
 		Sub: map[string]*shell.Verb{
 			"preview": {
 				Name:    "preview",
-				Summary: "Preview the cost / duration of a training order",
-				Usage:   "train preview <building> <unit> <count>",
+				Summary: "Show a building's trainable units, or preview a specific order",
+				Usage:   "train preview [<building>] [<unit>] [<count>]",
 				Run:     runTrainPreview,
 				Complete: shell.SuggestFunc(func(_ context.Context, _ *shell.Session, _ string) ([]string, error) {
 					return append([]string(nil), trainingBuildings...), nil
@@ -196,10 +196,39 @@ func resolveTrainArgs(ctx context.Context, args []string) (building, unit string
 
 // ── train preview ────────────────────────────────────────────────────
 
+// runTrainPreview is variadic:
+//   - 0 args            → catalog for every military building
+//   - <building>        → catalog for that building (its units, cost/time,
+//     and the count the stockpile affords)
+//   - <building> <unit> → single-unit preview at count 1
+//   - <building> <unit> <count> → exact-count preview
 func runTrainPreview(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
-	if len(args) != 3 {
-		return errors.New("usage: train preview <building> <unit> <count>")
+	if len(args) > 3 {
+		return errors.New("usage: train preview [<building>] [<unit>] [<count>]")
 	}
+	kingdomID, err := shared.RequireKingdomID(ctx, sess)
+	if err != nil {
+		return err
+	}
+
+	// 0 or 1 args: print the discovery catalog.
+	if len(args) <= 1 {
+		building := ""
+		if len(args) == 1 {
+			building = args[0]
+			if !isKnown(trainingBuildings, building) {
+				return fmt.Errorf("unknown building %q (one of: %s)", building, strings.Join(trainingBuildings, ", "))
+			}
+		}
+		cat, err := sess.API.TrainingCatalog(ctx, kingdomID, building)
+		if err != nil {
+			return err
+		}
+		printTrainCatalog(sess, cat)
+		return nil
+	}
+
+	// 2 or 3 args: preview a specific (building, unit, count) order.
 	building, unit := args[0], args[1]
 	if !isKnown(trainingBuildings, building) {
 		return fmt.Errorf("unknown building %q (one of: %s)", building, strings.Join(trainingBuildings, ", "))
@@ -207,13 +236,12 @@ func runTrainPreview(ctx context.Context, sess *shell.Session, args []string, _ 
 	if !isKnown(unitKinds, unit) {
 		return fmt.Errorf("unknown unit %q (one of: %s)", unit, strings.Join(unitKinds, ", "))
 	}
-	count, err := strconv.Atoi(args[2])
-	if err != nil || count <= 0 {
-		return fmt.Errorf("count must be a positive integer, got %q", args[2])
-	}
-	kingdomID, err := shared.RequireKingdomID(ctx, sess)
-	if err != nil {
-		return err
+	count := 1
+	if len(args) == 3 {
+		count, err = strconv.Atoi(args[2])
+		if err != nil || count <= 0 {
+			return fmt.Errorf("count must be a positive integer, got %q", args[2])
+		}
 	}
 	prev, err := sess.API.PreviewTrainingOrder(ctx, kingdomID, building, unit, count)
 	if err != nil {
