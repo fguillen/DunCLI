@@ -26,7 +26,7 @@ func init() {
 	shell.Register(&shell.Verb{
 		Name:    "server",
 		Summary: "Manage server membership",
-		Usage:   "server <join|...>",
+		Usage:   "server <join|use> <slug>",
 		Sub: map[string]*shell.Verb{
 			"join": {
 				Name:     "join",
@@ -34,6 +34,13 @@ func init() {
 				Usage:    "server join <slug>",
 				Run:      runServerJoin,
 				Complete: shell.SuggestFunc(suggestEligibleServerSlugs),
+			},
+			"use": {
+				Name:     "use",
+				Summary:  "Set an already-joined server as the active scope",
+				Usage:    "server use <slug>",
+				Run:      runServerUse,
+				Complete: shell.SuggestFunc(suggestMemberServerSlugs),
 			},
 		},
 	})
@@ -111,6 +118,37 @@ func runServerJoin(ctx context.Context, sess *shell.Session, args []string, _ ma
 	return nil
 }
 
+// runServerUse implements `server use <slug>`. Unlike `server join`,
+// it makes no JoinServer call — it sets a server the player already
+// belongs to as the active scope. This is the only way to switch
+// between servers you've already joined: re-running `server join`
+// errors because JoinServer rejects an already-member request.
+func runServerUse(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: server use <slug>")
+	}
+	slug := args[0]
+	list, err := sess.API.ListPlayerServers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, s := range list {
+		if s.Slug != slug {
+			continue
+		}
+		if !s.Member {
+			return fmt.Errorf("you haven't joined %q — run `server join %s`", slug, slug)
+		}
+		sess.Context.SetServer(slug)
+		if perr := sess.State.Save(sess.Context.Snapshot()); perr != nil {
+			shell.Err(sess.Out, fmt.Errorf("persist state: %w", perr))
+		}
+		shell.Success(sess.Out, fmt.Sprintf("scope set to server %q (slug=%s)", s.Name, slug))
+		return nil
+	}
+	return fmt.Errorf("no server with slug %q", slug)
+}
+
 // runJoinSugar implements the `join` built-in. `join <slug>` joins a
 // server; `join world <slug>` joins a world on the in-scope server.
 func runJoinSugar(ctx context.Context, sess *shell.Session, args []string, flags map[string]string) error {
@@ -136,6 +174,23 @@ func suggestEligibleServerSlugs(ctx context.Context, sess *shell.Session, _ stri
 	out := make([]string, 0, len(list))
 	for _, s := range list {
 		if !s.Member {
+			out = append(out, s.Slug)
+		}
+	}
+	return out, nil
+}
+
+// suggestMemberServerSlugs is the dynamic Suggester for `server use` —
+// the mirror of suggestEligibleServerSlugs, it lists every server the
+// player already belongs to.
+func suggestMemberServerSlugs(ctx context.Context, sess *shell.Session, _ string) ([]string, error) {
+	list, err := sess.API.ListPlayerServers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if s.Member {
 			out = append(out, s.Slug)
 		}
 	}

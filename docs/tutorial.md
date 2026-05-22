@@ -227,8 +227,9 @@ dun> where
   kingdom: IronFist
 ```
 
-- `server` is set by `server join` (or the post-login picker).
-- `world` is set by `world join`.
+- `server` is set by `server join`, `server use`, or the post-login
+  picker.
+- `world` is set by `world join` or `world use`.
 - `kingdom` is your per-server handle, recorded by `profile set` and
   used as your kingdom's display name in every world on that server.
 
@@ -274,6 +275,25 @@ error: invite only (code=forbidden, request_id=req-9c1a...)
 ```
 dun> server join no-such-slug
 error: not found (code=not_found, request_id=req-2e44...)
+```
+
+### `server use <slug>`
+
+Switches your session scope to a server you have **already joined** —
+without re-joining it. Use this to move between servers you belong to;
+`server join` would error on a server you're already a member of. The
+slug arg tab-completes from your `Member of` servers.
+
+```
+dun> server use acme
+scope set to server "Acme" (slug=acme)
+```
+
+If you haven't joined the server yet, it points you at `server join`:
+
+```
+dun> server use beta
+error: you haven't joined "beta" — run `server join beta`
 ```
 
 ## 8. Your profile on a server
@@ -513,6 +533,35 @@ the in-scope server.
 The convenience alias `join world <slug>` does the same thing. (And
 `join <server-slug>` still works for servers — same `join` verb,
 two forms.)
+
+### `world use <slug>`
+
+Switches your session scope to a world you have **already joined** —
+without re-joining it. Reach for this when you start a fresh session,
+or after `where` shows `world: (none)` for a world you know you're in:
+`world join` can't be replayed, since the backend rejects a second
+join.
+
+```
+dun> world use spring-2026
+scope set to world "Spring 2026" (slug=spring-2026)
+home region: reg-2
+```
+
+If you haven't joined the world yet, it points you at `world join`:
+
+```
+dun> world use winter-2026
+error: you haven't joined "winter-2026" yet — run `world join winter-2026`
+```
+
+And if the join window has already closed, it says so plainly instead
+of attempting a doomed join:
+
+```
+dun> world use autumn-2025
+error: you haven't joined "autumn-2025" and the join window has closed (status=active)
+```
 
 ## 11. Map, regions, ruins, nodes
 

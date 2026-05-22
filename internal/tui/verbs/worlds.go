@@ -21,7 +21,7 @@ func init() {
 	shell.Register(&shell.Verb{
 		Name:    "world",
 		Summary: "Manage worlds on the in-scope server",
-		Usage:   "world <show|join> <slug>",
+		Usage:   "world <show|join|use> <slug>",
 		Sub: map[string]*shell.Verb{
 			"show": {
 				Name:     "show",
@@ -35,6 +35,13 @@ func init() {
 				Summary:  "Join a world by slug — switches scope on success",
 				Usage:    "world join <slug>",
 				Run:      runWorldJoin,
+				Complete: shell.SuggestFunc(suggestAnyWorldSlug),
+			},
+			"use": {
+				Name:     "use",
+				Summary:  "Enter an already-joined world — sets it as the active scope",
+				Usage:    "world use <slug>",
+				Run:      runWorldUse,
 				Complete: shell.SuggestFunc(suggestAnyWorldSlug),
 			},
 		},
@@ -131,6 +138,54 @@ func runWorldJoin(ctx context.Context, sess *shell.Session, args []string, _ map
 		shell.Info(sess.Out, "home region assigned: "+hr)
 	} else {
 		shell.Info(sess.Out, "no home region yet — assigned when the world starts")
+	}
+	return nil
+}
+
+// runWorldUse implements `world use <slug>`. Unlike `world join`, it
+// makes no JoinWorld call — it sets a world the player has already
+// joined as the active scope. Membership is confirmed via the
+// World.my_kingdom field returned by ShowWorld; without that guard a
+// stray `world use` would leave verbs scoped to a world with no
+// kingdom.
+func runWorldUse(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
+	if len(args) != 1 {
+		return errors.New("usage: world use <slug>")
+	}
+	slug := args[0]
+	serverSlug := sess.Context.ServerSlug()
+	if serverSlug == "" {
+		return errors.New("not in a server scope — try `server join <slug>` first")
+	}
+	serverID, err := sess.API.ResolveServer(ctx, serverSlug)
+	if err != nil {
+		return err
+	}
+	worldID, err := sess.API.ResolveWorld(ctx, serverID, slug)
+	if err != nil {
+		return err
+	}
+	world, err := sess.API.ShowWorld(ctx, worldID)
+	if err != nil {
+		return err
+	}
+	mk, joined := world.MyKingdom.Get()
+	if !joined {
+		switch world.Status {
+		case gen.WorldStatusProposed, gen.WorldStatusGrace:
+			return fmt.Errorf("you haven't joined %q yet — run `world join %s`", slug, slug)
+		default:
+			return fmt.Errorf("you haven't joined %q and the join window has closed (status=%s)", slug, world.Status)
+		}
+	}
+
+	sess.Context.SetWorld(slug)
+	if perr := sess.State.Save(sess.Context.Snapshot()); perr != nil {
+		shell.Err(sess.Out, fmt.Errorf("persist state: %w", perr))
+	}
+	shell.Success(sess.Out, fmt.Sprintf("scope set to world %q (slug=%s)", world.Name, slug))
+	if hr, ok := mk.HomeRegionID.Get(); ok {
+		shell.Info(sess.Out, "home region: "+hr)
 	}
 	return nil
 }

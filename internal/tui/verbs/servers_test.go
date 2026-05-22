@@ -118,3 +118,52 @@ func TestRunServerJoin_propagatesForbidden(t *testing.T) {
 	require.Equal(t, "forbidden", apiErr.Code)
 	require.Empty(t, sess.Context.ServerSlug(), "context must not be set on failed join")
 }
+
+func TestRunServerUse_setsContextForMember(t *testing.T) {
+	sess, out, _ := newTestSession(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-srv")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"servers": []map[string]any{
+				{"id": "1", "slug": "acme", "name": "Acme", "member": true},
+			},
+		})
+	})
+
+	require.NoError(t, runServerUse(context.Background(), sess, []string{"acme"}, nil))
+	require.Equal(t, "acme", sess.Context.ServerSlug())
+	require.Contains(t, out.String(), `scope set to server "Acme" (slug=acme)`)
+}
+
+func TestRunServerUse_rejectsNonMember(t *testing.T) {
+	sess, _, _ := newTestSession(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-srv")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"servers": []map[string]any{
+				{"id": "2", "slug": "beta", "name": "Beta", "member": false},
+			},
+		})
+	})
+
+	err := runServerUse(context.Background(), sess, []string{"beta"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "haven't joined")
+	require.Empty(t, sess.Context.ServerSlug(), "scope must not be set for a non-member server")
+}
+
+func TestRunServerUse_rejectsUnknownSlug(t *testing.T) {
+	sess, _, _ := newTestSession(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-srv")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"servers": []map[string]any{
+				{"id": "1", "slug": "acme", "name": "Acme", "member": true},
+			},
+		})
+	})
+
+	err := runServerUse(context.Background(), sess, []string{"ghost"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no server with slug")
+}

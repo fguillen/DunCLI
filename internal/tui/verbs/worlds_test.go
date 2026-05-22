@@ -133,6 +133,74 @@ func TestRunWorldJoin_propagatesForbidden(t *testing.T) {
 	require.Empty(t, sess.Context.WorldSlug(), "world scope must not be set on failure")
 }
 
+// worldShowFixture returns a handler for GET /v1/worlds/wld-1 with the
+// given lifecycle status, optionally carrying a my_kingdom block (set
+// iff the caller has joined).
+func worldShowFixture(status string, joined bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		mk := ""
+		if joined {
+			mk = `,"my_kingdom":{"id":"kgd-7","world_id":"wld-1",` +
+				`"home_region_id":"reg-2","stockpiles":{"gold":0},` +
+				`"joined_at":"2026-05-02T00:00:00Z"}`
+		}
+		_, _ = w.Write([]byte(`{
+			"id":"wld-1","server_id":"srv-1","slug":"spring-2026",
+			"name":"Spring 2026","status":"` + status + `","min_players":8,
+			"t0_at":"2026-05-01T00:00:00Z","region_count":42,
+			"kingdom_count":5` + mk + `}`))
+	}
+}
+
+func TestRunWorldUse_setsWorldScopeForJoinedWorld(t *testing.T) {
+	extra := map[string]http.HandlerFunc{
+		"/v1/worlds/wld-1": worldShowFixture("grace", true),
+	}
+	sess, out, _ := newTestSession(t, worldsHandler(t, extra))
+	sess.Context.SetServer("acme")
+
+	require.NoError(t, runWorldUse(context.Background(), sess, []string{"spring-2026"}, nil))
+	require.Equal(t, "spring-2026", sess.Context.WorldSlug())
+	got := out.String()
+	require.Contains(t, got, `scope set to world "Spring 2026" (slug=spring-2026)`)
+	require.Contains(t, got, "home region: reg-2")
+}
+
+func TestRunWorldUse_rejectsUnjoinedJoinableWorld(t *testing.T) {
+	extra := map[string]http.HandlerFunc{
+		"/v1/worlds/wld-1": worldShowFixture("grace", false),
+	}
+	sess, _, _ := newTestSession(t, worldsHandler(t, extra))
+	sess.Context.SetServer("acme")
+
+	err := runWorldUse(context.Background(), sess, []string{"spring-2026"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "haven't joined")
+	require.Contains(t, err.Error(), "world join spring-2026")
+	require.Empty(t, sess.Context.WorldSlug(), "scope must not be set for an unjoined world")
+}
+
+func TestRunWorldUse_rejectsUnjoinedClosedWorld(t *testing.T) {
+	extra := map[string]http.HandlerFunc{
+		"/v1/worlds/wld-1": worldShowFixture("active", false),
+	}
+	sess, _, _ := newTestSession(t, worldsHandler(t, extra))
+	sess.Context.SetServer("acme")
+
+	err := runWorldUse(context.Background(), sess, []string{"spring-2026"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "join window has closed")
+	require.Empty(t, sess.Context.WorldSlug())
+}
+
+func TestRunWorldUse_requiresServerScope(t *testing.T) {
+	sess, _, _ := newTestSession(t, worldsHandler(t, nil))
+	err := runWorldUse(context.Background(), sess, []string{"spring-2026"}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not in a server scope")
+}
+
 func TestRunJoinSugar_routesWorldKeyword(t *testing.T) {
 	extra := map[string]http.HandlerFunc{
 		"/v1/worlds/wld-1/join": func(w http.ResponseWriter, _ *http.Request) {
