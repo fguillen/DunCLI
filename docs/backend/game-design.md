@@ -433,7 +433,7 @@ These map-related deferrals from earlier drafts have since been committed in Sec
 | Resource | Iron Mine | Produces iron |
 | Storage | Warehouse | Increases stockpile cap, raid loot scales with cap |
 | Military | Barracks | Trains Levy, Archer, Pikeman |
-| Military | Stable | Trains Knights and Scouts |
+| Military | Stable | Trains Knights, Scouts, Royal Guard |
 | Military | Siege Workshop | Trains Catapult and Trebuchet |
 | Defensive | Walls | Boosts defender bonus in your kingdom |
 | Defensive | Watchtower | Detects incoming attacks earlier, more lead time |

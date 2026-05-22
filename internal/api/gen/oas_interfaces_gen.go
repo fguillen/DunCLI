@@ -277,6 +277,10 @@ type StartWorldRes interface {
 	startWorldRes()
 }
 
+type TrainingCatalogRes interface {
+	trainingCatalogRes()
+}
+
 type UpdateOwnProfileRes interface {
 	updateOwnProfileRes()
 }

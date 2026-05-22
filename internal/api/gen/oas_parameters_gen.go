@@ -325,6 +325,13 @@ type StartWorldParams struct {
 	ID string
 }
 
+// TrainingCatalogParams is parameters of trainingCatalog operation.
+type TrainingCatalogParams struct {
+	// Restrict the catalog to one military building. Omit for all three.
+	Building OptTrainingCatalogBuilding `json:",omitempty,omitzero"`
+	ID       string
+}
+
 // UpdateOwnProfileParams is parameters of updateOwnProfile operation.
 type UpdateOwnProfileParams struct {
 	ID string

@@ -6449,6 +6449,52 @@ func (o OptString) Or(d string) string {
 	return d
 }
 
+// NewOptTrainingCatalogBuilding returns new OptTrainingCatalogBuilding with value set to v.
+func NewOptTrainingCatalogBuilding(v TrainingCatalogBuilding) OptTrainingCatalogBuilding {
+	return OptTrainingCatalogBuilding{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptTrainingCatalogBuilding is optional TrainingCatalogBuilding.
+type OptTrainingCatalogBuilding struct {
+	Value TrainingCatalogBuilding
+	Set   bool
+}
+
+// IsSet returns true if OptTrainingCatalogBuilding was set.
+func (o OptTrainingCatalogBuilding) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptTrainingCatalogBuilding) Reset() {
+	var v TrainingCatalogBuilding
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptTrainingCatalogBuilding) SetTo(v TrainingCatalogBuilding) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptTrainingCatalogBuilding) Get() (v TrainingCatalogBuilding, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptTrainingCatalogBuilding) Or(d TrainingCatalogBuilding) TrainingCatalogBuilding {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateOwnProfileReq returns new OptUpdateOwnProfileReq with value set to v.
 func NewOptUpdateOwnProfileReq(v UpdateOwnProfileReq) OptUpdateOwnProfileReq {
 	return OptUpdateOwnProfileReq{
@@ -8941,6 +8987,256 @@ func (s *TradeLedgerEntryStatus) UnmarshalText(data []byte) error {
 		return errors.Errorf("invalid value: %q", data)
 	}
 }
+
+// Ref: #/components/schemas/TrainingCatalog
+type TrainingCatalog struct {
+	KingdomID string                 `json:"kingdom_id"`
+	Buildings []TrainingCatalogEntry `json:"buildings"`
+}
+
+// GetKingdomID returns the value of KingdomID.
+func (s *TrainingCatalog) GetKingdomID() string {
+	return s.KingdomID
+}
+
+// GetBuildings returns the value of Buildings.
+func (s *TrainingCatalog) GetBuildings() []TrainingCatalogEntry {
+	return s.Buildings
+}
+
+// SetKingdomID sets the value of KingdomID.
+func (s *TrainingCatalog) SetKingdomID(val string) {
+	s.KingdomID = val
+}
+
+// SetBuildings sets the value of Buildings.
+func (s *TrainingCatalog) SetBuildings(val []TrainingCatalogEntry) {
+	s.Buildings = val
+}
+
+func (*TrainingCatalog) trainingCatalogRes() {}
+
+type TrainingCatalogBuilding string
+
+const (
+	TrainingCatalogBuildingBarracks      TrainingCatalogBuilding = "barracks"
+	TrainingCatalogBuildingStable        TrainingCatalogBuilding = "stable"
+	TrainingCatalogBuildingSiegeWorkshop TrainingCatalogBuilding = "siege_workshop"
+)
+
+// AllValues returns all TrainingCatalogBuilding values.
+func (TrainingCatalogBuilding) AllValues() []TrainingCatalogBuilding {
+	return []TrainingCatalogBuilding{
+		TrainingCatalogBuildingBarracks,
+		TrainingCatalogBuildingStable,
+		TrainingCatalogBuildingSiegeWorkshop,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s TrainingCatalogBuilding) MarshalText() ([]byte, error) {
+	switch s {
+	case TrainingCatalogBuildingBarracks:
+		return []byte(s), nil
+	case TrainingCatalogBuildingStable:
+		return []byte(s), nil
+	case TrainingCatalogBuildingSiegeWorkshop:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *TrainingCatalogBuilding) UnmarshalText(data []byte) error {
+	switch TrainingCatalogBuilding(data) {
+	case TrainingCatalogBuildingBarracks:
+		*s = TrainingCatalogBuildingBarracks
+		return nil
+	case TrainingCatalogBuildingStable:
+		*s = TrainingCatalogBuildingStable
+		return nil
+	case TrainingCatalogBuildingSiegeWorkshop:
+		*s = TrainingCatalogBuildingSiegeWorkshop
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/TrainingCatalogEntry
+type TrainingCatalogEntry struct {
+	BuildingKind  TrainingCatalogEntryBuildingKind `json:"building_kind"`
+	BuildingBuilt bool                             `json:"building_built"`
+	// 0 if the building has not been built yet.
+	BuildingLevel int                   `json:"building_level"`
+	Units         []TrainingCatalogUnit `json:"units"`
+}
+
+// GetBuildingKind returns the value of BuildingKind.
+func (s *TrainingCatalogEntry) GetBuildingKind() TrainingCatalogEntryBuildingKind {
+	return s.BuildingKind
+}
+
+// GetBuildingBuilt returns the value of BuildingBuilt.
+func (s *TrainingCatalogEntry) GetBuildingBuilt() bool {
+	return s.BuildingBuilt
+}
+
+// GetBuildingLevel returns the value of BuildingLevel.
+func (s *TrainingCatalogEntry) GetBuildingLevel() int {
+	return s.BuildingLevel
+}
+
+// GetUnits returns the value of Units.
+func (s *TrainingCatalogEntry) GetUnits() []TrainingCatalogUnit {
+	return s.Units
+}
+
+// SetBuildingKind sets the value of BuildingKind.
+func (s *TrainingCatalogEntry) SetBuildingKind(val TrainingCatalogEntryBuildingKind) {
+	s.BuildingKind = val
+}
+
+// SetBuildingBuilt sets the value of BuildingBuilt.
+func (s *TrainingCatalogEntry) SetBuildingBuilt(val bool) {
+	s.BuildingBuilt = val
+}
+
+// SetBuildingLevel sets the value of BuildingLevel.
+func (s *TrainingCatalogEntry) SetBuildingLevel(val int) {
+	s.BuildingLevel = val
+}
+
+// SetUnits sets the value of Units.
+func (s *TrainingCatalogEntry) SetUnits(val []TrainingCatalogUnit) {
+	s.Units = val
+}
+
+type TrainingCatalogEntryBuildingKind string
+
+const (
+	TrainingCatalogEntryBuildingKindBarracks      TrainingCatalogEntryBuildingKind = "barracks"
+	TrainingCatalogEntryBuildingKindStable        TrainingCatalogEntryBuildingKind = "stable"
+	TrainingCatalogEntryBuildingKindSiegeWorkshop TrainingCatalogEntryBuildingKind = "siege_workshop"
+)
+
+// AllValues returns all TrainingCatalogEntryBuildingKind values.
+func (TrainingCatalogEntryBuildingKind) AllValues() []TrainingCatalogEntryBuildingKind {
+	return []TrainingCatalogEntryBuildingKind{
+		TrainingCatalogEntryBuildingKindBarracks,
+		TrainingCatalogEntryBuildingKindStable,
+		TrainingCatalogEntryBuildingKindSiegeWorkshop,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s TrainingCatalogEntryBuildingKind) MarshalText() ([]byte, error) {
+	switch s {
+	case TrainingCatalogEntryBuildingKindBarracks:
+		return []byte(s), nil
+	case TrainingCatalogEntryBuildingKindStable:
+		return []byte(s), nil
+	case TrainingCatalogEntryBuildingKindSiegeWorkshop:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *TrainingCatalogEntryBuildingKind) UnmarshalText(data []byte) error {
+	switch TrainingCatalogEntryBuildingKind(data) {
+	case TrainingCatalogEntryBuildingKindBarracks:
+		*s = TrainingCatalogEntryBuildingKindBarracks
+		return nil
+	case TrainingCatalogEntryBuildingKindStable:
+		*s = TrainingCatalogEntryBuildingKindStable
+		return nil
+	case TrainingCatalogEntryBuildingKindSiegeWorkshop:
+		*s = TrainingCatalogEntryBuildingKindSiegeWorkshop
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type TrainingCatalogNotFound ErrorEnvelope
+
+func (*TrainingCatalogNotFound) trainingCatalogRes() {}
+
+type TrainingCatalogUnauthorized ErrorEnvelope
+
+func (*TrainingCatalogUnauthorized) trainingCatalogRes() {}
+
+// Ref: #/components/schemas/TrainingCatalogUnit
+type TrainingCatalogUnit struct {
+	Unit        Unit         `json:"unit"`
+	PerUnitCost StockpileMap `json:"per_unit_cost"`
+	// Training time per unit at the current building level (level 1 for unbuilt buildings).
+	PerUnitSeconds int `json:"per_unit_seconds"`
+	// Largest count the current stockpile can fully fund for this unit,
+	// `min(stockpile[r] // per_unit_cost[r])` across resources with a
+	// positive per-unit cost.
+	MaxAffordableCount int `json:"max_affordable_count"`
+	// True iff the building is built and the unit is allowed there
+	// (advisory). `POST /kingdoms/{id}/train` still enforces.
+	Trainable bool `json:"trainable"`
+}
+
+// GetUnit returns the value of Unit.
+func (s *TrainingCatalogUnit) GetUnit() Unit {
+	return s.Unit
+}
+
+// GetPerUnitCost returns the value of PerUnitCost.
+func (s *TrainingCatalogUnit) GetPerUnitCost() StockpileMap {
+	return s.PerUnitCost
+}
+
+// GetPerUnitSeconds returns the value of PerUnitSeconds.
+func (s *TrainingCatalogUnit) GetPerUnitSeconds() int {
+	return s.PerUnitSeconds
+}
+
+// GetMaxAffordableCount returns the value of MaxAffordableCount.
+func (s *TrainingCatalogUnit) GetMaxAffordableCount() int {
+	return s.MaxAffordableCount
+}
+
+// GetTrainable returns the value of Trainable.
+func (s *TrainingCatalogUnit) GetTrainable() bool {
+	return s.Trainable
+}
+
+// SetUnit sets the value of Unit.
+func (s *TrainingCatalogUnit) SetUnit(val Unit) {
+	s.Unit = val
+}
+
+// SetPerUnitCost sets the value of PerUnitCost.
+func (s *TrainingCatalogUnit) SetPerUnitCost(val StockpileMap) {
+	s.PerUnitCost = val
+}
+
+// SetPerUnitSeconds sets the value of PerUnitSeconds.
+func (s *TrainingCatalogUnit) SetPerUnitSeconds(val int) {
+	s.PerUnitSeconds = val
+}
+
+// SetMaxAffordableCount sets the value of MaxAffordableCount.
+func (s *TrainingCatalogUnit) SetMaxAffordableCount(val int) {
+	s.MaxAffordableCount = val
+}
+
+// SetTrainable sets the value of Trainable.
+func (s *TrainingCatalogUnit) SetTrainable(val bool) {
+	s.Trainable = val
+}
+
+type TrainingCatalogUnprocessableEntity ErrorEnvelope
+
+func (*TrainingCatalogUnprocessableEntity) trainingCatalogRes() {}
 
 // Ref: #/components/schemas/TrainingOrder
 type TrainingOrder struct {

@@ -1278,6 +1278,48 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
+  /kingdoms/{id}/train/catalog:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: trainingCatalog
+      tags: [Player kingdoms]
+      summary: List trainable units for the kingdom's military buildings
+      description: |
+        Returns, for each military building (or one if `building` is given),
+        the units it can train. Each unit entry equals what
+        `GET /kingdoms/{id}/train/preview` returns for that building/unit at
+        `count: 1` — per-unit cost, per-unit training time at the current
+        building level, and `max_affordable_count`.
+
+        `trainable` is advisory: true only when the building is built and the
+        unit is allowed there. `POST /kingdoms/{id}/train` still enforces.
+
+        `Training::ResolveCompletions` runs first so `building_level` reflects
+        any training that has ripened since the last request.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: building
+          required: false
+          description: Restrict the catalog to one military building. Omit for all three.
+          schema:
+            type: string
+            enum: [barracks, stable, siege_workshop]
+      responses:
+        "200":
+          description: Training catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrainingCatalog" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`invalid_building_kind` when `building` is not a military building."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /kingdoms/{id}/armies:
     parameters:
       - $ref: "#/components/parameters/PathId"
@@ -2970,6 +3012,53 @@ components:
             Largest count the current stockpile can fully fund, computed as
             `min(stockpile[r] // per_unit_cost[r])` across resources where the
             per-unit cost is positive.
+
+    TrainingCatalog:
+      type: object
+      required: [kingdom_id, buildings]
+      properties:
+        kingdom_id: { type: string }
+        buildings:
+          type: array
+          items: { $ref: "#/components/schemas/TrainingCatalogEntry" }
+
+    TrainingCatalogEntry:
+      type: object
+      required: [building_kind, building_built, building_level, units]
+      properties:
+        building_kind:
+          type: string
+          enum: [barracks, stable, siege_workshop]
+        building_built: { type: boolean }
+        building_level:
+          type: integer
+          minimum: 0
+          description: 0 if the building has not been built yet.
+        units:
+          type: array
+          items: { $ref: "#/components/schemas/TrainingCatalogUnit" }
+
+    TrainingCatalogUnit:
+      type: object
+      required: [unit, per_unit_cost, per_unit_seconds, max_affordable_count, trainable]
+      properties:
+        unit: { $ref: "#/components/schemas/Unit" }
+        per_unit_cost: { $ref: "#/components/schemas/StockpileMap" }
+        per_unit_seconds:
+          type: integer
+          description: Training time per unit at the current building level (level 1 for unbuilt buildings).
+        max_affordable_count:
+          type: integer
+          minimum: 0
+          description: |
+            Largest count the current stockpile can fully fund for this unit,
+            `min(stockpile[r] // per_unit_cost[r])` across resources with a
+            positive per-unit cost.
+        trainable:
+          type: boolean
+          description: |
+            True iff the building is built and the unit is allowed there
+            (advisory). `POST /kingdoms/{id}/train` still enforces.
 
     Composition:
       type: object

@@ -76,6 +76,7 @@ const (
 	SplitArmyOperation               OperationName = "SplitArmy"
 	StartWonderOperation             OperationName = "StartWonder"
 	StartWorldOperation              OperationName = "StartWorld"
+	TrainingCatalogOperation         OperationName = "TrainingCatalog"
 	UpdateOwnProfileOperation        OperationName = "UpdateOwnProfile"
 	UpdateServerOperation            OperationName = "UpdateServer"
 )

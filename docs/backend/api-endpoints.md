@@ -130,6 +130,7 @@ See [06-military.md](06-military.md).
 | Method | Path | Service | Notes |
 |---|---|---|---|
 | GET | `/v1/kingdoms/:id/train/preview?building=&unit=&count=` | `Training::Preview` | per-unit + total cost/time, affordability, `max_affordable_count` — read-only |
+| GET | `/v1/kingdoms/:id/train/catalog?building=` | `Training::Catalog` | per-unit cost/time + `max_affordable_count` for one or all military buildings — read-only |
 | POST | `/v1/kingdoms/:id/train` | `Training::Queue` | independent queues per barracks/stable/siege_workshop |
 | DELETE | `/v1/kingdoms/:id/train/:order_id` | `Training::Cancel` | 75% refund per unit count |
 

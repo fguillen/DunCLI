@@ -112,6 +112,7 @@ var operationRolesPlayerBearer = map[string][]string{
 	ShowWorldMapOperation:         []string{},
 	SplitArmyOperation:            []string{},
 	StartWonderOperation:          []string{},
+	TrainingCatalogOperation:      []string{},
 	UpdateOwnProfileOperation:     []string{},
 }
 

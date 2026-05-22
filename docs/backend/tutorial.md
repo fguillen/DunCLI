@@ -910,6 +910,38 @@ curl "http://localhost:3000/v1/kingdoms/01HK.../train/preview?building=barracks&
 
 `max_affordable_count` is the largest count your current stockpile can fully fund — useful when you want to "train as many as I can afford" without trial-and-error. `unit_trainable_here` and `building_built` are advisory flags: the preview still reports cost even when they're false, but the actual `POST .../train` will reject the combo.
 
+**Discover what you can train.** `train/preview` needs you to already know the unit name. To list a building's units — and their cost, time, and `max_affordable_count` — up front, use `train/catalog`. The `building` param is optional: omit it for all three military buildings.
+
+```bash
+curl "http://localhost:3000/v1/kingdoms/01HK.../train/catalog?building=stable" \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK`:
+
+```json
+{
+  "kingdom_id": "01HK...",
+  "buildings": [
+    {
+      "building_kind": "stable",
+      "building_built": true,
+      "building_level": 2,
+      "units": [
+        { "unit": "knight", "per_unit_cost": { "gold": 100, "wood": 20, "stone": 0, "iron": 80 },
+          "per_unit_seconds": 228, "max_affordable_count": 312, "trainable": true },
+        { "unit": "scout", "per_unit_cost": { "gold": 50, "wood": 0, "stone": 0, "iron": 0 },
+          "per_unit_seconds": 57, "max_affordable_count": 625, "trainable": true },
+        { "unit": "royal_guard", "per_unit_cost": { "gold": 200, "wood": 50, "stone": 50, "iron": 150 },
+          "per_unit_seconds": 1425, "max_affordable_count": 156, "trainable": true }
+      ]
+    }
+  ]
+}
+```
+
+Each unit entry is exactly what `train/preview` returns for that building/unit at `count: 1`. `trainable` is advisory (`building_built` and the unit allowed there). Omitting `building` returns `barracks`, `stable`, and `siege_workshop` together.
+
 **Queue a training order.**
 
 ```bash
