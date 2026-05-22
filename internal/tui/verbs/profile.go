@@ -42,10 +42,10 @@ func init() {
 // wrong input before we burn a request.
 var handleSyntax = regexp.MustCompile(`^[A-Za-z0-9_-]{3,24}$`)
 
-// runProfileShow implements `profile show` — uses the existing
-// ShowPlayerProfile endpoint scoped to the in-context server, with
-// the caller's own handle pulled from the current context (when
-// known) or rejected with a clear error if not.
+// runProfileShow implements `profile show` — fetches the caller's own
+// per-server profile via showOwnProfile (no handle needed) and caches
+// the handle it learns into the session context, so `profile set`'s
+// form pre-seed and `where` stay in sync without a prior `profile set`.
 func runProfileShow(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
 	serverSlug := sess.Context.ServerSlug()
 	if serverSlug == "" {
@@ -55,18 +55,20 @@ func runProfileShow(ctx context.Context, sess *shell.Session, _ []string, _ map[
 	if err != nil {
 		return err
 	}
-	handle := sess.Context.KingdomHandle()
-	if handle == "" {
-		// We don't know our own handle on this server yet. For Phase
-		// 4 the only way to learn it is via a profile fetch — which
-		// requires the handle. Surface as a backend co-evolution
-		// note. The user can still set a fresh handle via
-		// `profile set --handle ...`.
-		return errors.New("don't know your handle on this server yet — set one with `profile set --handle <name>`")
-	}
-	prof, err := sess.API.ShowPlayerProfile(ctx, serverID, handle)
+	prof, err := sess.API.ShowOwnProfile(ctx, serverID)
 	if err != nil {
+		// handle_not_set: joined the server but never picked a handle.
+		// Turn the backend envelope into an actionable hint.
+		if apiErr := api.AsError(err); apiErr != nil && apiErr.Code == "handle_not_set" {
+			return errors.New("you haven't set a handle on this server yet — set one with `profile set --handle <name>`")
+		}
 		return err
+	}
+	if prof.Handle != sess.Context.KingdomHandle() {
+		sess.Context.SetKingdomHandle(prof.Handle)
+		if perr := sess.State.Save(sess.Context.Snapshot()); perr != nil {
+			shell.Err(sess.Out, fmt.Errorf("persist state: %w", perr))
+		}
 	}
 	printProfileRead(sess, prof)
 	return nil

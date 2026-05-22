@@ -250,6 +250,33 @@ func (c *Client) ShowPlayerProfile(ctx context.Context, serverID, handle string)
 	return out, err
 }
 
+// ShowOwnProfile fetches the caller's own per-server profile. Unlike
+// ShowPlayerProfile it needs no handle — the backend resolves the
+// profile from the authenticated player. A handle_not_set / not_found
+// envelope means the caller has joined the server but not yet picked a
+// handle (or has not joined it at all).
+func (c *Client) ShowOwnProfile(ctx context.Context, serverID string) (*gen.PlayerProfileRead, error) {
+	var out *gen.PlayerProfileRead
+	err := c.call(ctx, gen.ShowOwnProfileOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ShowOwnProfile(ctx, gen.ShowOwnProfileParams{ID: serverID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.PlayerProfileRead:
+				out = v
+				return nil
+			case *gen.ShowOwnProfileNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ShowOwnProfileUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ShowOwnProfileOperation, res)
+		},
+	)
+	return out, err
+}
+
 // ShowWorld fetches world detail including the caller's kingdom summary
 // when present. Backs ResolveKingdom (which reads MyKingdom).
 func (c *Client) ShowWorld(ctx context.Context, worldID string) (*gen.World, error) {

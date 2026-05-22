@@ -320,11 +320,12 @@ IronFist
   raids:    7 launched, 2 defended
 ```
 
-If you just joined a server and haven't picked a handle yet:
+If you joined the server but haven't picked a handle yet, there's no
+profile to show:
 
 ```
 dun> profile show
-error: don't know your handle on this server yet — set one with `profile set --handle <name>`
+error: you haven't set a handle on this server yet — set one with `profile set --handle <name>`
 ```
 
 The fix is `profile set` below.

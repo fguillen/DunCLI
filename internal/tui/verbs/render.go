@@ -8,8 +8,9 @@ import (
 )
 
 // printProfileRead renders a PlayerProfileRead (returned by
-// showPlayerProfile) to the session's scrollback. Kept here so both
-// the `profile show` and `player show` verbs share the same layout.
+// showOwnProfile / showPlayerProfile) to the session's scrollback. Kept
+// here so both the `profile show` and `player show` verbs share the
+// same layout.
 func printProfileRead(sess *shell.Session, p *gen.PlayerProfileRead) {
 	if p == nil {
 		return

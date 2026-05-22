@@ -80,3 +80,61 @@ func TestRunProfileSet_requiresServerScope(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "server scope")
 }
+
+func TestRunProfileShow_fetchesAndCachesHandle(t *testing.T) {
+	sess, out, _ := newTestSession(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-ps")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/servers"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"servers": []map[string]any{{"id": "srv-1", "slug": "acme", "name": "Acme", "member": true}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/servers/srv-1/me"):
+			require.Equal(t, http.MethodGet, r.Method)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"handle":    "IronFist",
+				"real_name": "Alice Smith",
+				"title":     nil,
+				"joined_at": "2026-05-12T00:00:00Z",
+				"stats": map[string]any{
+					"rounds_played": 3, "rounds_won": 1,
+					"wonders_completed": 0, "wonders_destroyed": 0,
+					"peak_nodes":     0,
+					"raids_launched": 7, "raids_defended": 2,
+					"raids_won_offense": 0, "raids_won_defense": 0,
+					"resources_looted": 0,
+				},
+			})
+		}
+	})
+
+	sess.Context.SetServer("acme")
+	require.NoError(t, runProfileShow(context.Background(), sess, nil, nil))
+	require.Contains(t, out.String(), "IronFist")
+	require.Equal(t, "IronFist", sess.Context.KingdomHandle(),
+		"profile show must cache the handle learned from the backend")
+}
+
+func TestRunProfileShow_handleNotSet(t *testing.T) {
+	sess, _, _ := newTestSession(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-ps")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/servers"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"servers": []map[string]any{{"id": "srv-1", "slug": "acme", "name": "Acme", "member": true}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/servers/srv-1/me"):
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "handle_not_set", "message": "You haven't set a handle on this server yet."},
+			})
+		}
+	})
+
+	sess.Context.SetServer("acme")
+	err := runProfileShow(context.Background(), sess, nil, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "profile set --handle")
+}
