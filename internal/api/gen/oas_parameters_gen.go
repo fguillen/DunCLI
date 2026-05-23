@@ -175,6 +175,11 @@ type ListWorldInvitationsParams struct {
 	WorldID string
 }
 
+// ListWorldKingdomsParams is parameters of listWorldKingdoms operation.
+type ListWorldKingdomsParams struct {
+	WorldID string
+}
+
 // ListWorldWondersParams is parameters of listWorldWonders operation.
 type ListWorldWondersParams struct {
 	WorldID string

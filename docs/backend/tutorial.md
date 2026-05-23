@@ -1002,7 +1002,7 @@ curl http://localhost:3000/v1/worlds/01HW.../map \
 { "regions": [ { "id": "01HR...", "name": "Ashenfield", "terrain": "plains", "...": "..." } ] }
 ```
 
-Returns a `RegionSummary` for every region: id, name, terrain, node count, current governance.
+Returns a `RegionSummary` for every region: id, name, terrain, nodes, adjacency. Each region also carries `owner_kingdom_id` and `owner_handle` — the kingdom holding its home-hoard node, or `null` when unclaimed. That's how the `map` verb shows which player sits where.
 
 **Drill into one region.**
 
@@ -1011,7 +1011,7 @@ curl http://localhost:3000/v1/worlds/01HW.../regions/01HR... \
   -H 'Authorization: Bearer k_live_player_xyz...'
 ```
 
-Full region detail — governance, units present, Wonders sited here, every node with its production rate.
+Full region detail — units present, Wonders sited here, every node with its production rate. The region and each node carry `owner_kingdom_id` and `owner_handle` so you see ownership by player handle, not raw ULIDs.
 
 **Walk the adjacency graph.**
 
@@ -1031,11 +1031,20 @@ curl http://localhost:3000/v1/worlds/01HW.../nodes \
 
 Includes three flavors:
 
-- **Wilderness nodes** — `owner_kingdom_id: null`, static NPC `garrison` populated. Capturable.
-- **Captured nodes** — `owner_kingdom_id` set, empty `garrison`. Producing for their owner.
+- **Wilderness nodes** — `owner_kingdom_id: null`, `owner_handle: null`, static NPC `garrison` populated. Capturable.
+- **Captured nodes** — `owner_kingdom_id`/`owner_handle` set, empty `garrison`. Producing for their owner.
 - **Home-hoard nodes** — `is_home_hoard: true`. Permanently bound to a kingdom's home region.
 
 `GET /v1/worlds/{world_id}/nodes/{id}` returns a single node.
+
+**See who else is in the world.**
+
+```bash
+curl http://localhost:3000/v1/worlds/01HW.../kingdoms \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+Returns a `WorldKingdomEntry` for every kingdom — the roster: `handle`, `title`, `home_region_name`, `nodes_controlled`/`ruins_claimed` counts, a coarse `wonder` summary, and whether each is `eliminated`. `is_you` flags your own kingdom. This is the always-visible picture of *who, how many, and how they're doing*; finer intel — stockpiles, buildings, armies — is what scouting uncovers.
 
 **List ruins** — one-time resource caches scattered on the map.
 
