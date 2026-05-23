@@ -39,9 +39,10 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 				"regions": []map[string]any{
 					{
 						"id": "reg-1", "name": "Greyhollow", "terrain": "forest",
-						"position":  map[string]any{"x": 0.1, "y": 0.2},
-						"adjacency": []string{"reg-2"},
-						"nodes":     []map[string]any{{"id": "nd-1", "resource": "gold", "tier": "standard", "is_home_hoard": true}},
+						"position":         map[string]any{"x": 0.1, "y": 0.2},
+						"adjacency":        []string{"reg-2"},
+						"owner_kingdom_id": "kgd-7", "owner_handle": "IronFist",
+						"nodes": []map[string]any{{"id": "nd-1", "resource": "gold", "tier": "standard", "is_home_hoard": true}},
 					},
 					{
 						"id": "reg-2", "name": "Ironvale", "terrain": "hills",
@@ -65,6 +66,7 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 					},
 				},
 				"owner_kingdom_id": "kgd-7",
+				"owner_handle":     "IronFist",
 			})
 		case strings.HasSuffix(r.URL.Path, "/worlds/wld-1/regions/reg-1/adjacent"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -118,6 +120,8 @@ func TestRunMap_listsRegionsWithGlyph(t *testing.T) {
 	require.Contains(t, got, "T  ", "forest glyph must appear")
 	require.Contains(t, got, "^  ", "hills glyph must appear")
 	require.Contains(t, got, "adj=Ironvale")
+	require.Contains(t, got, "IronFist", "owned region must show the owner handle")
+	require.Contains(t, got, "(wild)", "unclaimed region must show (wild)")
 }
 
 func TestRunRegionShow_includesAdjacent(t *testing.T) {
@@ -128,7 +132,7 @@ func TestRunRegionShow_includesAdjacent(t *testing.T) {
 	require.NoError(t, runRegionShow(context.Background(), sess, []string{"Greyhollow"}, nil))
 	got := out.String()
 	require.Contains(t, got, "Greyhollow")
-	require.Contains(t, got, "owner:     kgd-7")
+	require.Contains(t, got, "owner:     IronFist")
 	require.Contains(t, got, "adjacent:  Ironvale")
 }
 

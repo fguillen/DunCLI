@@ -309,11 +309,7 @@ func attackableTargets(ctx context.Context, sess *shell.Session, worldID, myKing
 		byRegion[regionID] = append(byRegion[regionID], n)
 	}
 	return projectTargets(byRegion, func(group []gen.Node) (string, []string) {
-		owner := ""
-		if v, ok := group[0].OwnerKingdomID.Get(); ok {
-			owner = v
-		}
-		return describeNodeGroup(group, owner), previewLinesForNodes(group)
+		return describeNodeGroup(group, nodeOwner(group[0], "")), previewLinesForNodes(group)
 	}), nil
 }
 
@@ -386,10 +382,7 @@ func describeNodeGroup(group []gen.Node, owner string) string {
 func previewLinesForNodes(group []gen.Node) []string {
 	lines := make([]string, 0, len(group))
 	for _, n := range group {
-		owner := "(wild)"
-		if v, ok := n.OwnerKingdomID.Get(); ok {
-			owner = v
-		}
+		owner := nodeOwner(n, "(wild)")
 		garrison := ""
 		if g, ok := n.Garrison.Get(); ok && len(g) > 0 {
 			garrison = "  garrison=" + formatComposition(map[string]int(g))

@@ -109,7 +109,7 @@ var nodesFixture = []map[string]any{
 	},
 	{
 		"id": "nd-foe", "resource": "stone", "tier": "standard",
-		"is_home_hoard": false, "owner_kingdom_id": "kgd-9",
+		"is_home_hoard": false, "owner_kingdom_id": "kgd-9", "owner_handle": "Ragnar",
 		"region_id": "reg-4", "region_name": "Highmoor",
 		"base_rate": 12, "garrison": map[string]int{},
 	},
@@ -166,7 +166,7 @@ func TestAttackableTargets_returnsOnlyForeignOwned(t *testing.T) {
 	require.Len(t, targets, 1)
 	require.Equal(t, "Highmoor", targets[0].RegionName)
 	require.Equal(t, "reg-4", targets[0].RegionID)
-	require.Contains(t, targets[0].description, "owner=kgd-9")
+	require.Contains(t, targets[0].description, "owner=Ragnar")
 }
 
 func TestClaimableTargets_skipsClaimed(t *testing.T) {

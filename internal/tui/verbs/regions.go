@@ -124,10 +124,34 @@ func terrainGlyph(t string) string {
 	return "?"
 }
 
+// optString unwraps an OptNilString to its value, returning "" when the
+// field is absent, null, or empty.
+func optString(o gen.OptNilString) string {
+	v, ok := o.Get()
+	if !ok {
+		return ""
+	}
+	return v
+}
+
+// nodeOwner returns a node's owner as a display label, preferring the
+// human-readable owner_handle over the raw kingdom ULID. wild is
+// returned when the node has no owner at all.
+func nodeOwner(n gen.Node, wild string) string {
+	if h := optString(n.OwnerHandle); h != "" {
+		return h
+	}
+	if id := optString(n.OwnerKingdomID); id != "" {
+		return id
+	}
+	return wild
+}
+
 // runMap implements `map` — prints one styled line per region. The
 // adjacency list is rendered by name (resolved via the same map
 // response, since RegionSummary.adjacency is a []string of region
-// IDs).
+// IDs). The owner column shows the occupying player's handle, or
+// `(wild)` for an unclaimed region.
 func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
 	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
@@ -157,9 +181,14 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 				adj = append(adj, id)
 			}
 		}
-		lines = append(lines, fmt.Sprintf("%s  %-16s  nodes=%d  adj=%s",
+		owner := "(wild)"
+		if h := optString(r.OwnerHandle); h != "" {
+			owner = h
+		}
+		lines = append(lines, fmt.Sprintf("%s  %-16s  %-14s  nodes=%d  adj=%s",
 			terrainGlyph(string(r.Terrain)),
 			r.Name,
+			owner,
 			len(r.Nodes),
 			strings.Join(adj, ", "),
 		))
@@ -376,10 +405,7 @@ func formatComposition(m map[string]int) string {
 }
 
 func formatNodeRow(n gen.Node) string {
-	owner := "wild"
-	if v, ok := n.OwnerKingdomID.Get(); ok {
-		owner = v
-	}
+	owner := nodeOwner(n, "wild")
 	if n.IsHomeHoard {
 		owner = "home-hoard"
 	}
@@ -400,11 +426,13 @@ func formatNodeRow(n gen.Node) string {
 func printRegion(sess *shell.Session, r *gen.Region, adj []gen.ShowRegionAdjacentOKRegionsItem) {
 	shell.Strong(sess.Out, fmt.Sprintf("%s  (%s)", r.Name, terrainGlyph(string(r.Terrain))+" "+string(r.Terrain)))
 	_, _ = fmt.Fprintf(sess.Out, "  position:  x=%.2f y=%.2f\n", r.Position.X, r.Position.Y)
-	if owner, ok := r.OwnerKingdomID.Get(); ok {
-		_, _ = fmt.Fprintln(sess.Out, "  owner:     "+owner)
-	} else {
-		_, _ = fmt.Fprintln(sess.Out, "  owner:     (wild)")
+	owner := "(wild)"
+	if h := optString(r.OwnerHandle); h != "" {
+		owner = h
+	} else if id := optString(r.OwnerKingdomID); id != "" {
+		owner = id
 	}
+	_, _ = fmt.Fprintln(sess.Out, "  owner:     "+owner)
 	if hub, ok := r.IsHub.Get(); ok && hub {
 		_, _ = fmt.Fprintln(sess.Out, "  hub:       yes")
 	}
@@ -440,10 +468,7 @@ func printNode(sess *shell.Session, n *gen.Node) {
 	if v, ok := n.RegionName.Get(); ok {
 		_, _ = fmt.Fprintln(sess.Out, "  region:    "+v)
 	}
-	owner := "(wild)"
-	if v, ok := n.OwnerKingdomID.Get(); ok {
-		owner = v
-	}
+	owner := nodeOwner(*n, "(wild)")
 	if n.IsHomeHoard {
 		owner = "(home-hoard)"
 	}

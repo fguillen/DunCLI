@@ -638,6 +638,32 @@ func (c *Client) ListNodes(ctx context.Context, worldID string) ([]gen.Node, err
 	return out, err
 }
 
+// ListWorldKingdoms returns the public kingdom roster for the given
+// world — every kingdom with coarse, always-visible progress (handle,
+// home region, territory counts, wonder summary, title). Detailed
+// intel stays scout-only per game-design §16.9.
+func (c *Client) ListWorldKingdoms(ctx context.Context, worldID string) ([]gen.WorldKingdomEntry, error) {
+	var out []gen.WorldKingdomEntry
+	err := c.call(ctx, gen.ListWorldKingdomsOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListWorldKingdoms(ctx, gen.ListWorldKingdomsParams{WorldID: worldID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListWorldKingdomsOK:
+				out = v.Kingdoms
+				return nil
+			case *gen.ListWorldKingdomsNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListWorldKingdomsUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListWorldKingdomsOperation, res)
+		},
+	)
+	return out, err
+}
+
 // ShowNode fetches one node's detail by ULID.
 func (c *Client) ShowNode(ctx context.Context, worldID, nodeID string) (*gen.Node, error) {
 	var out *gen.Node

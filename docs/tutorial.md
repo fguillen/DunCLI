@@ -569,7 +569,7 @@ dun> world use autumn-2025
 error: you haven't joined "autumn-2025" and the join window has closed (status=active)
 ```
 
-## 11. Map, regions, ruins, nodes
+## 11. Map, kingdoms, regions, ruins, nodes
 
 These verbs all require a world to be in scope. If you haven't joined
 or set one, you'll see:
@@ -583,14 +583,34 @@ error: not in a world scope — try `world join <slug>` first
 ```
 dun> map
 Map:
-  T  Greyhollow        nodes=1  adj=Ironvale
-  ^  Ironvale          nodes=0  adj=Greyhollow
+  T  Greyhollow        IronFist        nodes=1  adj=Ironvale
+  ^  Ironvale          (wild)          nodes=0  adj=Greyhollow
 ```
 
 The first column is a terrain glyph: `.` plains, `T` forest, `^`
-hills, `M` mountain, `~` marsh. Output goes to scrollback — there's
-no alt-screen and no navigation. To "step into" a neighbour, run
-`region show <neighbour>`.
+hills, `M` mountain, `~` marsh. The next column is the controlling
+player's handle — or `(wild)` for an unclaimed region — so a single
+`map` answers both "where is everything" and "who is where." Output
+goes to scrollback — there's no alt-screen and no navigation. To
+"step into" a neighbour, run `region show <neighbour>`. For the
+companion roster (who's playing, with progress), see `kingdoms`.
+
+### `kingdoms` — every kingdom in the in-scope world
+
+```
+dun> kingdoms
+Kingdoms:
+  IronFist (you)      Greyhollow        nodes=4    ruins=1   wonder=great_library construction 42%
+  Ragnar              Highmoor          nodes=2    ruins=0   wonder=—  eliminated  [Champion of Eldoria]
+```
+
+The public roster — every kingdom on the world with coarse,
+always-visible progress: handle (with `(you)` marking your own),
+home region, node and ruin counts, and a one-line wonder summary.
+Cross-round reputation titles (e.g. `[Champion of Eldoria]`) and
+the `eliminated` flag are appended when set. Detailed intel —
+stockpiles, armies, build/training queues — stays hidden by design
+(§16.9). Order is join time.
 
 ### `region show <name>`
 
@@ -598,7 +618,7 @@ no alt-screen and no navigation. To "step into" a neighbour, run
 dun> region show Greyhollow
 Greyhollow  (T forest)
   position:  x=0.10 y=0.20
-  owner:     kgd-7
+  owner:     IronFist
   nodes:
     Greyhollow        gold    standard  owner=home-hoard
   adjacent:  Ironvale
@@ -1237,12 +1257,10 @@ kingdom (not yours, not a home-hoard).
 ```
 dun> node attack
 Pick a foreign-owned node to attack
-> Highmoor            owner=kgd-9  nodes=stone/standard
+> Highmoor            owner=Ragnar  nodes=stone/standard
 ```
 
-The preview shows the current owner — rendered as a ULID today,
-flagged upstream as a backend co-evolution candidate (an
-`owner_handle` mirror of Phase 9's `attacker_handle` gap).
+The preview shows the current owner as the owning player's handle.
 
 The confirm subtitle hedges on walk-in vs PvP:
 
