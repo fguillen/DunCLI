@@ -2,12 +2,6 @@
 
 Guide for Claude Code sessions in this repo. Read this before making changes.
 
-> **Start every session on a new branch.** Before doing anything else
-> in a session that will touch the repo, create a fresh branch off
-> `main` (e.g. `feat/march-eta`, `fix/capture-merge`, `docs/tutorial`).
-> Never work directly on `main` — it stays clean. See the
-> [Branching](#conventions) convention for the full rule.
-
 ## What this project is
 
 `dun-cli` is a Go terminal client (Bubble Tea TUI) for the `dun` async
@@ -220,14 +214,6 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
 
 ## Conventions
 
-- **Branching**: **always start a session on a new branch.** Creating a
-  fresh branch off `main` is the *first* step of any session that will
-  touch the repo (code, docs, or config) — before reading deeply,
-  before the first edit. Name it for the work (e.g. `feat/march-eta`,
-  `fix/capture-merge`, `docs/tutorial`). Never commit session changes
-  directly to `main`. Do all of the session's work on that branch; it
-  ends with the work committed there, ready to open a PR — `main` stays
-  clean.
 - **Errors**: backend uses the envelope
   `{ "error": { "code": "...", "message": "...", "retry_after": 30? } }`.
   The internal/api wrapper (Phase 1) is responsible for decoding it into a
