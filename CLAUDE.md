@@ -214,6 +214,11 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
 
 ## Conventions
 
+- **Branching**: never commit session code changes directly to `main`.
+  At the start of any session that will change code, create a new
+  branch off `main` (e.g. `feat/march-eta`, `fix/capture-merge`) and
+  do all of the session's work there. The session ends with the work
+  committed on that branch, ready to open a PR — `main` stays clean.
 - **Errors**: backend uses the envelope
   `{ "error": { "code": "...", "message": "...", "retry_after": 30? } }`.
   The internal/api wrapper (Phase 1) is responsible for decoding it into a

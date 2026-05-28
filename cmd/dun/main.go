@@ -37,7 +37,7 @@ import (
 // Version is the CLI version (semver). Bump it on every change per the
 // versioning convention in CLAUDE.md; at release -ldflags may append the
 // commit hash (see TODO.md).
-const Version = "0.1.1"
+const Version = "0.1.2"
 
 func main() {
 	if err := newRootCmd(os.Stdout).Execute(); err != nil {
