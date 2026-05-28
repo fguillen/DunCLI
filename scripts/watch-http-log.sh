@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# watch-http.sh
+# watch-http-log.sh [PATH_TO_LOGFILE]
 
 pending=""
 
