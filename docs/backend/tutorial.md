@@ -40,7 +40,7 @@ A one-page glossary; the rest of the tutorial assumes these.
 - **Round.** Synonym for a world's full lifetime from T0 to archive. Stats and Hall of Fame are per-server, summed across rounds.
 - **Kingdom.** A player's instance inside one world. Holds resources, buildings, armies, and (eventually) a Wonder.
 - **Region.** One tile on the world map. Has terrain, may contain nodes and ruins, and may host armies and Wonders.
-- **Node.** A capturable resource-production point inside a region. Wilderness nodes have NPC garrisons; home-hoard nodes produce passively.
+- **Node.** A capturable resource-production point inside a region. All nodes — including each kingdom's spawn home-hoard — start as wilderness with an NPC garrison; once captured, they produce passively for the owning kingdom.
 - **Army.** A group of units belonging to one kingdom. Lives at a region; can march, split, merge, recall.
 - **Caravan.** A march with intent `caravan` — moves resources between kingdoms. Public ledger records every dispatch.
 - **Wonder.** Endgame mega-build. Foundation → Construction (90h) → Consecration (24h). Surviving Consecration ends the round.
@@ -597,7 +597,7 @@ curl -X PATCH http://localhost:3000/v1/servers/01HX.../me \
 }
 ```
 
-`title` is auto-rendered from your stats (e.g. `[Champion of Aldermarch ×2]`) — it lights up once you've accumulated leaderboard credits ([§3.15](#315-read-the-archive-and-the-hall-of-fame)).
+`title` is auto-rendered from your stats (e.g. `[Champion of Aldermarch ×2]`) — it lights up once you've accumulated leaderboard credits ([§3.16](#316-read-the-archive-and-the-hall-of-fame)).
 
 **Handle rules (§17.1).**
 
@@ -732,6 +732,8 @@ curl -X POST http://localhost:3000/v1/worlds/01HW.../join \
 - Barracks, Walls, Watchtower at level 1.
 - 500 of each resource (`gold`, `wood`, `stone`, `iron`).
 - 20 Levy in your home Garrison army.
+
+**Your home-hoard is not yours yet.** Every spawn region carries a Standard-tier wilderness node flagged `is_home_hoard: true`. It is not owned by your kingdom at T0 — its garrison (`25 Levy, 10 Archer, 5 Pikeman`, per [§16.5](dun%20Game%20Design%20Document.v3.md)) must be defeated like any other wilderness node before it starts producing for you. Until then, `GET /v1/worlds/:id/map` will show your spawn region with `owner_kingdom_id: null`. Capturing it goes through the same `march:capture` flow as any other wilderness node — see [§3.10](#310-capture-nodes-and-claim-ruins).
 
 **Proposed vs grace differs in spawn assignment.**
 
@@ -961,7 +963,7 @@ curl -X POST http://localhost:3000/v1/kingdoms/01HK.../train \
 - **Archers** beat **Pikemen** (1.4–1.6×).
 - **Pikemen** beat **Knights** (1.4–1.6×).
 - **Catapults** are the only unit that can capture wilderness nodes ([§3.10](#310-capture-nodes-and-claim-ruins)).
-- **Trebuchets** are the only unit that deals significant damage to Wonders ([§3.13](#313-build-a-wonder)).
+- **Trebuchets** are the only unit that deals significant damage to Wonders ([§3.14](#314-build-a-wonder)).
 - **Scouts** ignore terrain modifiers (with Knights), useful for reconnaissance.
 - **Royal Guard** is elite defense.
 
@@ -1002,7 +1004,7 @@ curl http://localhost:3000/v1/worlds/01HW.../map \
 { "regions": [ { "id": "01HR...", "name": "Ashenfield", "terrain": "plains", "...": "..." } ] }
 ```
 
-Returns a `RegionSummary` for every region: id, name, terrain, node count, current governance.
+Returns a `RegionSummary` for every region: id, name, terrain, nodes, adjacency. Each region also carries `owner_kingdom_id` and `owner_handle` — the kingdom holding its home-hoard node, or `null` when unclaimed (this includes your own spawn region until you capture its home-hoard — see [§3.5](#35-join-a-world)). That's how the `map` verb shows which player sits where.
 
 **Drill into one region.**
 
@@ -1011,7 +1013,7 @@ curl http://localhost:3000/v1/worlds/01HW.../regions/01HR... \
   -H 'Authorization: Bearer k_live_player_xyz...'
 ```
 
-Full region detail — governance, units present, Wonders sited here, every node with its production rate.
+Full region detail — units present, Wonders sited here, every node with its production rate. The region and each node carry `owner_kingdom_id` and `owner_handle` so you see ownership by player handle, not raw ULIDs.
 
 **Walk the adjacency graph.**
 
@@ -1031,11 +1033,20 @@ curl http://localhost:3000/v1/worlds/01HW.../nodes \
 
 Includes three flavors:
 
-- **Wilderness nodes** — `owner_kingdom_id: null`, static NPC `garrison` populated. Capturable.
-- **Captured nodes** — `owner_kingdom_id` set, empty `garrison`. Producing for their owner.
+- **Wilderness nodes** — `owner_kingdom_id: null`, `owner_handle: null`, static NPC `garrison` populated. Capturable.
+- **Captured nodes** — `owner_kingdom_id`/`owner_handle` set, empty `garrison`. Producing for their owner.
 - **Home-hoard nodes** — `is_home_hoard: true`. Permanently bound to a kingdom's home region.
 
 `GET /v1/worlds/{world_id}/nodes/{id}` returns a single node.
+
+**See who else is in the world.**
+
+```bash
+curl http://localhost:3000/v1/worlds/01HW.../kingdoms \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+Returns a `WorldKingdomEntry` for every kingdom — the roster: `handle`, `title`, `home_region_name`, `nodes_controlled`/`ruins_claimed` counts, a coarse `wonder` summary, and whether each is `eliminated`. `is_you` flags your own kingdom. This is the always-visible picture of *who, how many, and how they're doing*; finer intel — stockpiles, buildings, armies — is what scouting uncovers.
 
 **List ruins** — one-time resource caches scattered on the map.
 
@@ -1101,12 +1112,12 @@ curl -X POST http://localhost:3000/v1/armies/01HN.../march \
 
 **The six intents:**
 
-- `attack` — fight whoever's there ([§3.11](#311-attack-and-raid)).
+- `attack` — fight whoever's there ([§3.12](#312-attack-and-raid)).
 - `reinforce` — join your own forces at the target (or a friendly's, if reinforcing a same-kingdom army).
 - `scout` — gather intel without engaging.
 - `capture` — take a wilderness node ([§3.10](#310-capture-nodes-and-claim-ruins)).
 - `claim_ruin` — pick up a ruin's resource cache ([§3.10](#310-capture-nodes-and-claim-ruins)).
-- `caravan` — deliver trade payload ([§3.12](#312-trade-with-caravans)). Dispatched via the caravan endpoint, not directly.
+- `caravan` — deliver trade payload ([§3.13](#313-trade-with-caravans)). Dispatched via the caravan endpoint, not directly.
 
 **Recall an in-flight march.**
 
@@ -1149,7 +1160,48 @@ Ruins are one-time caches — the resources transfer to your stockpile (capped b
 
 Track wilderness and ruin opportunities via the map endpoints from [§3.8](#38-read-the-map).
 
-### 3.11 Attack and raid
+### 3.11 Home-hoard nodes
+
+A **home-hoard** is the resource node placed in every kingdom's spawn region at map generation. It's the economic anchor of your starting position — but it works like a regular wilderness node in most respects. This section gathers the special-case rules in one place.
+
+**Placement and properties** (per [§16.5](dun%20Game%20Design%20Document.v3.md)):
+
+- One per spawn region. There are `ceil(players × 1.5)` spawn regions on a map (the extra 50% is the late-joiner buffer), each carrying exactly one home-hoard.
+- Always **Standard tier** — `base_rate: 250` per hour. No `poor` or `rich` home-hoards.
+- Flagged `is_home_hoard: true` on the `Node` row. This flag is **permanent** — it stays true regardless of who owns the node, so the node remains identifiable as a spawn anchor for the entire round.
+- The **resource** is chosen to fill the spawn's weakest neighborhood — at placement time the generator looks at the resource types of nodes already placed in the spawn's adjacent regions and picks whichever resource (gold/wood/stone/iron) is least represented. Concretely: if your neighborhood is iron-rich and wood-poor, your home-hoard will likely be wood.
+
+**Starting state**:
+
+- Owned by **nobody** at T0. The node has the standard wilderness garrison (`25 Levy, 10 Archer, 5 Pikeman`) that every Standard-tier node carries.
+- It does **not** produce for you until you capture it. The lazy stockpile accrual you read in [§3.6](#36-your-first-steps--economy) ignores unowned nodes.
+- The map endpoint reports the spawn region with `owner_kingdom_id: null`. The `your_spawn: true` flag tells you it's yours-to-claim, not yours-to-own.
+
+**How to take possession**:
+
+- Identical to the wilderness capture flow in [§3.10](#310-capture-nodes-and-claim-ruins). March an army containing at least one Catapult to your spawn region with `intent: "capture"`. Defeat the garrison. Ownership flips.
+- There is **no exemption** for your own home-hoard: you must build a Siege Workshop, train a Catapult, and clear the garrison just like any other wilderness node. There's no `march:settle` or "automatic claim" verb.
+- Once captured the garrison is cleared and does not respawn (per §16.5 — "one-time speedbump per node"). The node contributes its `base_rate` to your stockpile from that moment.
+
+**Can they be attacked?** **Yes — once owned, a home-hoard behaves like any captured node** (per §16.5 open follow-up: "behaves like any other captured node"):
+
+- An enemy can target your home-hoard region with `march:attack` (PvP — see [§3.12](#312-attack-and-raid)) or `march:capture` to flip ownership.
+- The capture flow is `Nodes::Attack`: if you have defenders parked at the region, a PvP battle resolves (with the standard combat rules, including walls if you happen to have built them there); if undefended, the attacker walks in and takes ownership with no Battle row.
+- **No respawn garrison.** Once the original wilderness garrison is defeated (by you, the original spawner, or whoever captured it first), it does not return. A home-hoard captured by an enemy then re-captured by you is an undefended walk-in unless someone parks units to defend.
+- The `is_home_hoard: true` flag travels with the node — even if your spawn has been taken by a rival, the map still identifies it as the spawn anchor; only `owner_kingdom_id` changes.
+
+**Map and region ownership**:
+
+- The `owner_kingdom_id` / `owner_handle` fields on a region are derived from the home-hoard node sitting in that region. When the home-hoard is unowned, the region reads as unowned; when it's owned, the region inherits the owner. There is no separate "region owner" record.
+- This is why `GET /v1/worlds/:id/map` may show your spawn as unclaimed early in the round, then show you as owner once you've captured the home-hoard, then potentially show an enemy as owner if they take it from you.
+
+**Other characteristics**:
+
+- Excluded from the regular node placer. The map's wilderness `PlaceNodes` stage skips spawn regions entirely — every spawn has *only* its home-hoard and no other nodes (so a spawn region has exactly one node, never two).
+- Home-hoards count toward the **`nodes_owned`** total reported on the kingdom roster ([§3.8](#38-read-the-map), `GET /v1/worlds/:id/kingdoms`) once captured — including the home-hoard.
+- Spawn regions are **never adjacent to a Rich node** (anti-snowball constraint from §16.5), so capturing your home-hoard never opens up a free Rich-node neighbor.
+
+### 3.12 Attack and raid
 
 Attacking another kingdom is a march with `intent: attack` against a region they hold (their home, a captured node's region, a wonder site).
 
@@ -1198,7 +1250,7 @@ Includes the round-by-round log. Only the attacker and defender kingdoms' owners
 
 See [openapi.yaml](openapi.yaml) — `dispatchMarch` (intent `attack`), `listKingdomBattles`, `showBattle`.
 
-### 3.12 Trade with caravans
+### 3.13 Trade with caravans
 
 A caravan is a march with `intent: caravan` that moves resources from your kingdom to another's. The escort split off your army carries it; if a hostile third party is camped at the destination, they intercept it.
 
@@ -1244,7 +1296,7 @@ Filters: `player` (matches sender, receiver, or attacker handle), `since` (e.g. 
 
 See [openapi.yaml](openapi.yaml) — `dispatchCaravan`, `listTradeLedger`.
 
-### 3.13 Build a Wonder
+### 3.14 Build a Wonder
 
 The Wonder is the endgame. Building one starts a 90-hour Construction phase followed by a 24-hour Consecration phase — surviving Consecration ends the round.
 
@@ -1281,7 +1333,7 @@ Effects: 25% foundation cost deducted, build queue locked (no new building upgra
 
 1. **Foundation** — instant, 25% paid up-front.
 2. **Construction** — 90h. HP accrues at 100 HP/hour up to 10 000 HP. Construction auto-pauses at HP thresholds 2500/5000/7500 — you must pay the corresponding milestone (10% of total cost each) to resume.
-3. **Consecration** — 24h at max vulnerability. Survive with HP > 0 and the round ends in your favor ([§3.14](#314-end-of-round)).
+3. **Consecration** — 24h at max vulnerability. Survive with HP > 0 and the round ends in your favor ([§3.15](#315-end-of-round)).
 
 **Pay a milestone.**
 
@@ -1327,7 +1379,7 @@ Public list of every Wonder in the world, ordered by creation time.
 
 See [openapi.yaml](openapi.yaml) — `getWonder`, `startWonder`, `repairWonder`, `payWonderMilestone`, `cancelWonder`, `listWorldWonders`.
 
-### 3.14 End of round
+### 3.15 End of round
 
 A round ends the moment any Wonder survives the full 24h Consecration phase with HP > 0. There's no manual trigger — the consecration handler atomically:
 
@@ -1340,7 +1392,7 @@ From the player's side, the world simply becomes read-only. All write endpoints 
 
 **If no Wonder consecrates** — the round can in principle run forever. There's no time cap on a `proposed → grace → active` lifecycle; it ends when someone wins. Admins can intervene by abandoning their own world (no admin "force-end" endpoint exists in v1).
 
-### 3.15 Read the archive and the Hall of Fame
+### 3.16 Read the archive and the Hall of Fame
 
 Once a world is archived, the snapshot and updated leaderboards are available.
 
@@ -1376,11 +1428,11 @@ The four leaderboards (§17.4):
 
 Snapshots only refresh at round end, so reading mid-round returns the previous round's standings. Caller must be a server member; non-members get `403`.
 
-**Persistent identity per server (§17.4).** Your handle, real name, stats counters, and Champion titles are stored against your `PlayerProfile`, which is scoped per server. They survive every round on that server until you delete your account ([§3.16](#316-account-hygiene)).
+**Persistent identity per server (§17.4).** Your handle, real name, stats counters, and Champion titles are stored against your `PlayerProfile`, which is scoped per server. They survive every round on that server until you delete your account ([§3.17](#317-account-hygiene)).
 
 See [openapi.yaml](openapi.yaml) — `getWorldArchive`, `getHallOfFame`.
 
-### 3.16 Account hygiene
+### 3.17 Account hygiene
 
 The same patterns as the admin side ([§2.2](#22-manage-your-api-keys)), plus account deletion.
 

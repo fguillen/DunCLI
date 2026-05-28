@@ -99,10 +99,11 @@ See [03-worlds-and-maps.md](03-worlds-and-maps.md).
 | GET | `/v1/servers/:id/worlds` | — | list every world on a server you belong to (lean shape — no `my_kingdom`); 404 to non-members |
 | POST | `/v1/worlds/:id/join` | `Worlds::Join` | join during proposed or grace; `AssignLateJoiner` during grace |
 | GET | `/v1/worlds/:id` | — | world summary + your kingdom |
-| GET | `/v1/worlds/:id/map` | — | full region/adjacency map |
-| GET | `/v1/worlds/:id/regions/:region_id` | — | one region's detail |
+| GET | `/v1/worlds/:id/map` | — | full region/adjacency map; each region carries `owner_kingdom_id`/`owner_handle` |
+| GET | `/v1/worlds/:id/regions/:region_id` | — | one region's detail; region + nodes carry `owner_kingdom_id`/`owner_handle` |
 | GET | `/v1/worlds/:id/regions/:region_id/adjacent` | — | adjacent region IDs |
 | GET | `/v1/worlds/:id/ruins` | — | all ruins (claimed and unclaimed) |
+| GET | `/v1/worlds/:id/kingdoms` | — | public roster: every kingdom with handle, home region, territory counts, Wonder summary, title |
 | GET | `/v1/worlds/:id/archive` | — | frozen end-of-round snapshot — 404 while live (Phase 10) |
 
 ---
@@ -170,7 +171,7 @@ See [08-nodes-and-ruins.md](08-nodes-and-ruins.md).
 
 | Method | Path | Service | Notes |
 |---|---|---|---|
-| GET | `/v1/worlds/:id/nodes` | — | all nodes on the world: wilderness, captured, home hoards |
+| GET | `/v1/worlds/:id/nodes` | — | all nodes on the world: wilderness, captured, home hoards; each carries `owner_kingdom_id`/`owner_handle` |
 | GET | `/v1/worlds/:id/nodes/:id` | — | single node detail |
 
 ### Mutation paths (driven by march intents, not direct endpoints)
