@@ -15,12 +15,16 @@ import (
 
 // Phase 10 — Nodes & ruins capture flows.
 //
-// Three sub-verbs (`node capture`, `node attack`, `ruin claim`) that
-// compose existing endpoints — `listNodes`, `listRuins`,
-// `listKingdomArmies`, `dispatchMarch` — into one-line wizards. No new
-// backend endpoints; the actual outcome (Nodes::Capture,
-// Nodes::Attack, Ruins::Claim) resolves at march arrival and surfaces
-// through the Phase 9 battles stream.
+// Two sub-verbs (`node capture`, `ruin claim`) that compose existing
+// endpoints — `listNodes`, `listRuins`, `listKingdomArmies`,
+// `dispatchMarch` — into one-line wizards. No new backend endpoints;
+// the actual outcome (Nodes::Capture, Ruins::Claim) resolves at march
+// arrival and surfaces through the Phase 9 battles stream.
+//
+// The backend merged the old Nodes::Attack service into Nodes::Capture,
+// so a single `capture` intent takes both a wilderness node (fight its
+// NPC garrison) and an enemy-owned node (fight the owner's defenders,
+// or walk in unopposed). `node capture` therefore lists both.
 //
 // Sub-verb registrations live next to the parent `node` / `ruin`
 // declarations in regions.go.
@@ -36,13 +40,15 @@ type expeditionTarget struct {
 	previewLines []string
 }
 
-// runNodeCapture implements `node capture [<region>]`.
+// runNodeCapture implements `node capture [<region>]`. The backend
+// merged Nodes::Attack into Nodes::Capture, so this one wizard lists
+// both wilderness and enemy-owned nodes.
 func runNodeCapture(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
 	worldID, kingdomID, err := requireWorldAndKingdom(ctx, sess)
 	if err != nil {
 		return err
 	}
-	targets, err := capturableTargets(ctx, sess, worldID)
+	targets, err := capturableTargets(ctx, sess, worldID, kingdomID)
 	if err != nil {
 		return err
 	}
@@ -51,32 +57,9 @@ func runNodeCapture(ctx context.Context, sess *shell.Session, args []string, _ m
 		kingdomID:       kingdomID,
 		name:            "node capture",
 		intent:          "capture",
-		pickTitle:       "Pick a wilderness node to capture",
-		emptyError:      "no wilderness nodes to capture in this world",
-		confirmSubtitle: "Wilderness garrisons don't retreat. Catapults are required to break them.",
-		followUp:        "track this fight with `battles` — outcome surfaces when the march arrives",
-		targets:         targets,
-	})
-}
-
-// runNodeAttack implements `node attack [<region>]`.
-func runNodeAttack(ctx context.Context, sess *shell.Session, args []string, _ map[string]string) error {
-	worldID, kingdomID, err := requireWorldAndKingdom(ctx, sess)
-	if err != nil {
-		return err
-	}
-	targets, err := attackableTargets(ctx, sess, worldID, kingdomID)
-	if err != nil {
-		return err
-	}
-	return runExpedition(ctx, sess, args, expeditionFlow{
-		worldID:         worldID,
-		kingdomID:       kingdomID,
-		name:            "node attack",
-		intent:          "capture",
-		pickTitle:       "Pick a foreign-owned node to attack",
-		emptyError:      "no foreign-owned nodes to attack in this world",
-		confirmSubtitle: "This may be a walk-in or contested — the CLI can't tell if a defending army is present.",
+		pickTitle:       "Pick a node to capture",
+		emptyError:      "no capturable nodes in this world",
+		confirmSubtitle: "Capture resolves on arrival — an NPC garrison, an enemy's defenders, or an unguarded walk-in. Catapults are required.",
 		followUp:        "track this fight with `battles` — outcome surfaces when the march arrives",
 		targets:         targets,
 	})
@@ -265,33 +248,11 @@ func requireWorldAndKingdom(ctx context.Context, sess *shell.Session) (worldID, 
 // ── target predicates ────────────────────────────────────────────────
 
 // capturableTargets returns one entry per region that contains at
-// least one wilderness node (no owner, not a home-hoard).
-func capturableTargets(ctx context.Context, sess *shell.Session, worldID string) ([]expeditionTarget, error) {
-	nodes, err := sess.API.ListNodes(ctx, worldID)
-	if err != nil {
-		return nil, err
-	}
-	byRegion := make(map[string][]gen.Node)
-	for _, n := range nodes {
-		_, owned := n.OwnerKingdomID.Get()
-		if n.IsHomeHoard || owned {
-			continue
-		}
-		regionID, _ := n.RegionID.Get()
-		if regionID == "" {
-			continue
-		}
-		byRegion[regionID] = append(byRegion[regionID], n)
-	}
-	return projectTargets(byRegion, func(group []gen.Node) (string, []string) {
-		desc := describeNodeGroup(group, "")
-		return desc, previewLinesForNodes(group)
-	}), nil
-}
-
-// attackableTargets returns one entry per region that contains at
-// least one node owned by another kingdom (not us, not home-hoard).
-func attackableTargets(ctx context.Context, sess *shell.Session, worldID, myKingdomID string) ([]expeditionTarget, error) {
+// least one capturable node: a wilderness node (no owner) or one owned
+// by another kingdom. Home-hoards (never seizable) and the caller's own
+// nodes are excluded — the backend rejects those at dispatch with
+// `home_hoard_protected` / `self_capture`.
+func capturableTargets(ctx context.Context, sess *shell.Session, worldID, myKingdomID string) ([]expeditionTarget, error) {
 	nodes, err := sess.API.ListNodes(ctx, worldID)
 	if err != nil {
 		return nil, err
@@ -299,7 +260,7 @@ func attackableTargets(ctx context.Context, sess *shell.Session, worldID, myKing
 	byRegion := make(map[string][]gen.Node)
 	for _, n := range nodes {
 		v, owned := n.OwnerKingdomID.Get()
-		if !owned || n.IsHomeHoard || v == myKingdomID {
+		if n.IsHomeHoard || (owned && v == myKingdomID) {
 			continue
 		}
 		regionID, _ := n.RegionID.Get()
@@ -424,23 +385,11 @@ func printExpeditionPreview(sess *shell.Session, name, intent string, t expediti
 // ── tab completion ───────────────────────────────────────────────────
 
 func suggestCapturableRegions(ctx context.Context, sess *shell.Session, _ string) ([]string, error) {
-	worldID, err := shared.RequireWorldID(ctx, sess)
-	if err != nil {
-		return nil, nil
-	}
-	targets, err := capturableTargets(ctx, sess, worldID)
-	if err != nil {
-		return nil, nil
-	}
-	return targetNames(targets), nil
-}
-
-func suggestAttackableRegions(ctx context.Context, sess *shell.Session, _ string) ([]string, error) {
 	worldID, kingdomID, err := requireWorldAndKingdom(ctx, sess)
 	if err != nil {
 		return nil, nil
 	}
-	targets, err := attackableTargets(ctx, sess, worldID, kingdomID)
+	targets, err := capturableTargets(ctx, sess, worldID, kingdomID)
 	if err != nil {
 		return nil, nil
 	}

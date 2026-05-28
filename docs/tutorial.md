@@ -652,7 +652,10 @@ Nodes:
 
 - `mine` — your kingdom owns it (and it's not a home-hoard).
 - `home-hoard` — home-hoard nodes. The owner column names the holding
-  kingdom, or reads `unclaimed`; your own is your immovable starter node.
+  kingdom, or reads `unclaimed`. A home-hoard is permanently reserved
+  for its home kingdom — only that kingdom can ever capture it, and it
+  can never be seized — so the owner is only ever its spawner or
+  `unclaimed`, never a rival.
 - `wild` — no owner.
 - `captured` — owned, but not by you.
 
@@ -996,7 +999,7 @@ Pick a march intent
 > scout         fast recon — observe defenders without engaging
   attack        engage a defender (combat resolves on arrival)
   reinforce     join a friendly army at the target region
-  capture       seize a wilderness node (requires catapult)
+  capture       seize a node — wilderness or enemy-owned (requires catapult)
   claim_ruin    claim a ruin's reward (grants warehouse-capped cache)
   caravan       deliver a trade payload to another player
 ```
@@ -1012,6 +1015,12 @@ march mrc-1  (scout)
 
 Tab completion on `march <Tab>` suggests your kingdom's armies; on
 `march Garrison <Tab>` it suggests region names.
+
+The backend validates `capture` and `attack` feasibility **at
+dispatch**, so an impossible march is rejected before it sets out. For
+`capture` the codes are listed under `node capture` in §15; an
+`attack` aimed at your own home region is rejected with
+`code=self_attack`.
 
 > Backend co-evolution candidate: a `march preview` endpoint mirroring
 > `build preview` would let the CLI pre-flight unreachable / illegal
@@ -1164,9 +1173,9 @@ dun> battle show bat-xxxx
 error: not found (code=not_found, request_id=req-…)
 ```
 
-## 15. Captures, attacks, and ruin claims
+## 15. Captures and ruin claims
 
-Phase 10 adds three guided wizards that compose the existing march
+Phase 10 adds two guided wizards that compose the existing march
 dispatch with target discovery. They require a world in scope and a
 kingdom in it (i.e. you have already done `world join`):
 
@@ -1174,12 +1183,15 @@ kingdom in it (i.e. you have already done `world join`):
 error: not in a world scope — try `world join <slug>` first
 ```
 
-None of them adds a new endpoint — under the hood they all call
-`dispatchMarch` with the right intent (`capture` for both node verbs,
-`claim_ruin` for the ruin verb). The actual outcome (combat
-resolution, ownership transfer, cache grant) happens server-side when
-the march arrives at the target region. Follow it via `battles` once
-the dispatch lands.
+Neither adds a new endpoint — under the hood they call `dispatchMarch`
+with the right intent (`capture` for the node verb, `claim_ruin` for
+the ruin verb). The actual outcome (combat resolution, ownership
+transfer, cache grant) happens server-side when the march arrives at
+the target region. Follow it via `battles` once the dispatch lands.
+
+The backend checks capture feasibility **at dispatch**, so an
+impossible capture is rejected up front (it never sets out) — see the
+error list under `node capture` below.
 
 Every flow follows the same six steps:
 
@@ -1198,16 +1210,23 @@ Every flow follows the same six steps:
 
 A confirm of `No` prints `aborted` and dispatches nothing.
 
-### `node capture [<region>]` — wilderness node capture
+### `node capture [<region>]` — node capture
 
-Eligible regions: any region containing a **wilderness** node (no
-owner, not a home-hoard).
+The backend merged the old `node attack` flow into `node capture`: a
+single `capture` intent now takes **both** a wilderness node (defeat
+its NPC garrison) **and** an enemy-owned node (defeat the owner's
+defenders at the region, or walk in unopposed if none are parked
+there). Either way, on a win the node's owner flips to you.
+
+Eligible regions: any region containing a node that is **wilderness**
+(no owner) or owned by **another** kingdom. Your own nodes and any
+home-hoard are excluded — they can't be a capture target.
 
 ```
 dun> node capture
-Pick a wilderness node to capture
-> Ironvale            nodes=iron/rich
-  Greyhollow          nodes=gold/standard
+Pick a node to capture
+> Highmoor            owner=Ragnar  nodes=stone/standard
+  Ironvale            nodes=iron/rich
 ```
 
 Picking Ironvale:
@@ -1220,7 +1239,7 @@ node capture preview
   army:      Garrison (cap=60, archer=3, levy=12)
   intent:    capture
 Dispatch capture march to Ironvale with Garrison?
-Wilderness garrisons don't retreat. Catapults are required to break them.
+Capture resolves on arrival — an NPC garrison, an enemy's defenders, or an unguarded walk-in. Catapults are required.
 > Yes   No
 ```
 
@@ -1234,11 +1253,26 @@ march mrc-1  (capture)
 track this fight with `battles` — outcome surfaces when the march arrives
 ```
 
-**Note on Catapults.** The dun §9 design requires a Catapult to break
-a wilderness garrison. The CLI deliberately does **not** enforce this
-client-side — the confirm subtitle is an honest non-blocking nudge,
-and the arrival-time defeat (if you dispatched without one) shows up
-in `battles` like any other lost fight.
+The preview shows a foreign node's current owner as the owning
+player's handle; a wilderness node reads as `owner=(wild)`. When you
+attack an enemy-owned node, the CLI can't tell whether a defending
+army is parked there — so the fight may resolve as a battle or as an
+unopposed walk-in. Either way the outcome lands in `battles`.
+
+**Catapults and other preconditions are now enforced at dispatch.**
+The backend checks feasibility before the army sets out, so an
+impossible capture is rejected immediately with a `422` rather than
+marching out and losing on arrival. The codes you may see:
+
+```
+error: a capture march needs at least one Catapult (code=catapult_required, request_id=req-…)
+error: that region has no node to capture (code=no_capturable_node, request_id=req-…)
+error: you already own that node (code=self_capture, request_id=req-…)
+error: that home-hoard can never be seized (code=home_hoard_protected, request_id=req-…)
+```
+
+(Messages are the backend's verbatim text; the `code=` is the stable
+identifier.) Catapults are trained at the Siege Workshop — see §13.
 
 Passing the region as an argument skips the first picker:
 
@@ -1250,39 +1284,13 @@ Common errors caught client-side:
 
 ```
 dun> node capture Greyhollow
-error: region "Greyhollow" not eligible for node capture (try: Ironvale)
+error: region "Greyhollow" not eligible for node capture (try: Highmoor, Ironvale)
 ```
 
 ```
 dun> node capture
-error: no wilderness nodes to capture in this world
+error: no capturable nodes in this world
 ```
-
-### `node attack [<region>]` — foreign-owned node attack
-
-Eligible regions: any region containing a node owned by **another**
-kingdom (not yours, not a home-hoard).
-
-```
-dun> node attack
-Pick a foreign-owned node to attack
-> Highmoor            owner=Ragnar  nodes=stone/standard
-```
-
-The preview shows the current owner as the owning player's handle.
-
-The confirm subtitle hedges on walk-in vs PvP:
-
-```
-Dispatch capture march to Highmoor with Garrison?
-This may be a walk-in or contested — the CLI can't tell if a defending army is present.
-> Yes   No
-```
-
-Why "may be"? The backend dispatches `Nodes::Attack` either way; if
-the defending kingdom has an army at the region on arrival, combat
-resolves; if not, ownership transfers without a fight. Either way the
-outcome lands in `battles`.
 
 ### `ruin claim [<region>]` — ruin claim
 
@@ -1318,9 +1326,9 @@ Warehouse is L0 (1000 cap) and you claim a Major ruin (up to 25k
 mixed resources), most of the cache evaporates. Upgrade Warehouse
 before claiming a big ruin.
 
-Tab completion (`node capture <Tab>`, `node attack <Tab>`,
-`ruin claim <Tab>`) lists only the eligible regions for that specific
-flow — not every region on the map.
+Tab completion (`node capture <Tab>`, `ruin claim <Tab>`) lists only
+the eligible regions for that specific flow — not every region on the
+map.
 
 ## 16. Trade
 

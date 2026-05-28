@@ -23,7 +23,7 @@ var marchIntentHelp = map[string]string{
 	"attack":     "engage a defender (combat resolves on arrival)",
 	"reinforce":  "join a friendly army at the target region",
 	"scout":      "fast recon — observe defenders without engaging",
-	"capture":    "seize a wilderness node (requires catapult)",
+	"capture":    "seize a node — wilderness or enemy-owned (requires catapult)",
 	"claim_ruin": "claim a ruin's reward (grants warehouse-capped cache)",
 	"caravan":    "deliver a trade payload to another player",
 }

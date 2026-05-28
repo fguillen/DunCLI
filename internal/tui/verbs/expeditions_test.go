@@ -81,10 +81,10 @@ func expeditionsHandler(t *testing.T, nodes []map[string]any, ruins []map[string
 // Four-node fixture covering every ownership case the predicates
 // must discriminate:
 //
-//   - nd-home : home-hoard, owned by caller (kgd-7) — neither target
+//   - nd-home : home-hoard, owned by caller (kgd-7) — not capturable
 //   - nd-wild : wilderness, no owner — capture target
-//   - nd-mine : owned by caller (not home-hoard) — neither target
-//   - nd-foe  : owned by another kingdom (kgd-9) — attack target
+//   - nd-mine : owned by caller (not home-hoard) — not capturable
+//   - nd-foe  : owned by another kingdom (kgd-9) — capture target
 //
 // Each lives in a distinct region so the predicates can be observed
 // as picker rows.
@@ -143,30 +143,24 @@ var armiesFixture = []map[string]any{
 
 // ── target predicate tests ───────────────────────────────────────────
 
-func TestCapturableTargets_returnsOnlyWildlessRegions(t *testing.T) {
+func TestCapturableTargets_returnsWildAndForeignOwned(t *testing.T) {
+	// Nodes::Attack merged into Nodes::Capture, so capturableTargets
+	// returns both the wilderness region (Ironvale) and the foreign-owned
+	// one (Highmoor) — but never the caller's own or home-hoard nodes.
 	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
 	sess.Context.SetServer("acme")
 	sess.Context.SetWorld("spring-2026")
 
-	targets, err := capturableTargets(context.Background(), sess, "wld-1")
+	targets, err := capturableTargets(context.Background(), sess, "wld-1", "kgd-7")
 	require.NoError(t, err)
-	require.Len(t, targets, 1)
-	require.Equal(t, "Ironvale", targets[0].RegionName)
-	require.Equal(t, "reg-2", targets[0].RegionID)
-	require.Contains(t, targets[0].description, "iron/rich")
-}
-
-func TestAttackableTargets_returnsOnlyForeignOwned(t *testing.T) {
-	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
-	sess.Context.SetServer("acme")
-	sess.Context.SetWorld("spring-2026")
-
-	targets, err := attackableTargets(context.Background(), sess, "wld-1", "kgd-7")
-	require.NoError(t, err)
-	require.Len(t, targets, 1)
+	require.Len(t, targets, 2)
+	// Sorted by region name: Highmoor, Ironvale.
 	require.Equal(t, "Highmoor", targets[0].RegionName)
 	require.Equal(t, "reg-4", targets[0].RegionID)
 	require.Contains(t, targets[0].description, "owner=Ragnar")
+	require.Equal(t, "Ironvale", targets[1].RegionName)
+	require.Equal(t, "reg-2", targets[1].RegionID)
+	require.Contains(t, targets[1].description, "iron/rich")
 }
 
 func TestClaimableTargets_skipsClaimed(t *testing.T) {
@@ -194,27 +188,16 @@ func TestRunNodeCapture_requiresWorldScope(t *testing.T) {
 }
 
 func TestRunNodeCapture_emptyEligibleErrorsBeforePicker(t *testing.T) {
-	// Strip the wilderness node from the fixture — nothing capturable.
-	nodes := []map[string]any{nodesFixture[0], nodesFixture[2], nodesFixture[3]}
+	// Keep only the caller's own home-hoard + own node — neither is a
+	// capture target, so nothing is capturable.
+	nodes := []map[string]any{nodesFixture[0], nodesFixture[2]}
 	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodes, ruinsFixture, armiesFixture))
 	sess.Context.SetServer("acme")
 	sess.Context.SetWorld("spring-2026")
 
 	err := runNodeCapture(context.Background(), sess, nil, nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "no wilderness nodes to capture")
-}
-
-func TestRunNodeAttack_emptyEligibleErrorsBeforePicker(t *testing.T) {
-	// Drop the foreign-owned node.
-	nodes := []map[string]any{nodesFixture[0], nodesFixture[1], nodesFixture[2]}
-	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodes, ruinsFixture, armiesFixture))
-	sess.Context.SetServer("acme")
-	sess.Context.SetWorld("spring-2026")
-
-	err := runNodeAttack(context.Background(), sess, nil, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "no foreign-owned nodes")
+	require.Contains(t, err.Error(), "no capturable nodes")
 }
 
 func TestRunRuinClaim_emptyEligibleErrorsBeforePicker(t *testing.T) {
@@ -234,10 +217,12 @@ func TestRunNodeCapture_rejectsUneligibleRegionArg(t *testing.T) {
 	sess.Context.SetServer("acme")
 	sess.Context.SetWorld("spring-2026")
 
+	// Greyhollow holds the caller's own home-hoard — never a capture target.
 	err := runNodeCapture(context.Background(), sess, []string{"Greyhollow"}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not eligible")
-	require.Contains(t, err.Error(), "Ironvale") // the one valid candidate
+	require.Contains(t, err.Error(), "Highmoor") // foreign-owned candidate
+	require.Contains(t, err.Error(), "Ironvale") // wilderness candidate
 }
 
 func TestRunNodeCapture_rejectsExtraArgs(t *testing.T) {
@@ -261,18 +246,6 @@ func TestRunNodeCapture_regionArgMatchesCaseInsensitively(t *testing.T) {
 	err := runNodeCapture(context.Background(), sess, []string{"ironvale"}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no home armies")
-}
-
-func TestRunNodeAttack_rejectsUneligibleRegionArg(t *testing.T) {
-	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
-	sess.Context.SetServer("acme")
-	sess.Context.SetWorld("spring-2026")
-
-	// Ironvale has only a wild node, not a foreign-owned one.
-	err := runNodeAttack(context.Background(), sess, []string{"Ironvale"}, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not eligible")
-	require.Contains(t, err.Error(), "Highmoor")
 }
 
 func TestRunRuinClaim_rejectsUneligibleRegionArg(t *testing.T) {
@@ -319,17 +292,7 @@ func TestSuggestCapturableRegions(t *testing.T) {
 
 	got, err := suggestCapturableRegions(context.Background(), sess, "")
 	require.NoError(t, err)
-	require.Equal(t, []string{"Ironvale"}, got)
-}
-
-func TestSuggestAttackableRegions(t *testing.T) {
-	sess, _, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
-	sess.Context.SetServer("acme")
-	sess.Context.SetWorld("spring-2026")
-
-	got, err := suggestAttackableRegions(context.Background(), sess, "")
-	require.NoError(t, err)
-	require.Equal(t, []string{"Highmoor"}, got)
+	require.Equal(t, []string{"Highmoor", "Ironvale"}, got)
 }
 
 func TestSuggestClaimableRegions(t *testing.T) {

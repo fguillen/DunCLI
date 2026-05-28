@@ -63,7 +63,7 @@ func init() {
 	shell.Register(&shell.Verb{
 		Name:    "node",
 		Summary: "Inspect or act on a node",
-		Usage:   "node <show|capture|attack> ...",
+		Usage:   "node <show|capture> ...",
 		Sub: map[string]*shell.Verb{
 			"show": {
 				Name:     "show",
@@ -74,17 +74,10 @@ func init() {
 			},
 			"capture": {
 				Name:     "capture",
-				Summary:  "Dispatch a capture march against a wilderness node",
+				Summary:  "Dispatch a capture march against a wilderness or enemy-owned node",
 				Usage:    "node capture [<region>]",
 				Run:      runNodeCapture,
 				Complete: shell.SuggestFunc(suggestCapturableRegions),
-			},
-			"attack": {
-				Name:     "attack",
-				Summary:  "Dispatch a capture march against a foreign-owned node",
-				Usage:    "node attack [<region>]",
-				Run:      runNodeAttack,
-				Complete: shell.SuggestFunc(suggestAttackableRegions),
 			},
 		},
 	})
