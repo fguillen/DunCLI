@@ -91,7 +91,19 @@ func runKingdomShow(ctx context.Context, sess *shell.Session, _ []string, _ map[
 	if err != nil {
 		return err
 	}
-	printKingdom(sess, kd)
+	// The detail endpoint returns home_region_id (a ULID) but no name,
+	// so resolve it to the region name for display, falling back to the
+	// raw id if the map lookup misses. Empty for a stub kingdom (world
+	// not yet started).
+	home := ""
+	if id := optString(kd.HomeRegionID); id != "" {
+		if name := shared.LookupRegionName(ctx, sess, id); name != "" {
+			home = name
+		} else {
+			home = id
+		}
+	}
+	printKingdom(sess, kd, home)
 	return nil
 }
 
@@ -362,10 +374,13 @@ func suggestActiveBuildKinds(ctx context.Context, sess *shell.Session, _ string)
 
 // ── printers ─────────────────────────────────────────────────────────
 
-func printKingdom(sess *shell.Session, kd *gen.KingdomDetail) {
+func printKingdom(sess *shell.Session, kd *gen.KingdomDetail, homeRegion string) {
 	sp := kd.Stockpiles
 	pr := kd.ProductionRates
 	shell.Strong(sess.Out, "Kingdom "+kd.ID)
+	if homeRegion != "" {
+		_, _ = fmt.Fprintln(sess.Out, "Home region: "+homeRegion)
+	}
 	shell.Section(sess.Out, "Stockpile (cap "+itoa(kd.WarehouseCap)+"):",
 		fmt.Sprintf("gold=%d  wood=%d  stone=%d  iron=%d", sp.Gold, sp.Wood, sp.Stone, sp.Iron))
 	shell.Section(sess.Out, "Production (per hour):",

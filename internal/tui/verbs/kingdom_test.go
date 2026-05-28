@@ -95,11 +95,17 @@ func TestRunKingdomShow_rendersDashboard(t *testing.T) {
 				"in_progress_training": []
 			}`))
 		},
+		"/v1/worlds/wld-1/map": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"regions":[
+				{"id":"reg-1","name":"Greyhollow","terrain":"forest","position":{"x":0.1,"y":0.2},"adjacency":[],"nodes":[]}
+			]}`))
+		},
 	}
 	sess, out := setupKingdomSession(t, extra)
 	require.NoError(t, runKingdomShow(context.Background(), sess, nil, nil))
 	got := out.String()
 	require.Contains(t, got, "Kingdom kgd-7")
+	require.Contains(t, got, "Home region: Greyhollow", "home_region_id must be resolved to its region name")
 	require.Contains(t, got, "gold=100")
 	require.Contains(t, got, "Production (per hour):")
 	require.Contains(t, got, "Builds in progress:")

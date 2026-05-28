@@ -685,6 +685,7 @@ kingdom — there's no `kingdom show <handle>` for other players in v1.
 ```
 dun> kingdom
 Kingdom kgd-7
+Home region: Greyhollow
 Stockpile (cap 1000):
   gold=100  wood=50  stone=25  iron=10
 Production (per hour):
@@ -695,9 +696,12 @@ Training in progress:
   (none)
 ```
 
-The stockpile is lazily accrued by the backend on every call against
-current production rates and the warehouse cap. ETAs in the in-
-progress sections are relative (e.g. `ETA 2h 14m`).
+`Home region:` names the region your kingdom spawned in — the seat of
+your immovable home-hoard node. It's omitted while your kingdom is
+still a stub (world not yet started). The stockpile is lazily accrued
+by the backend on every call against current production rates and the
+warehouse cap. ETAs in the in-progress sections are relative (e.g.
+`ETA 2h 14m`).
 
 ### `buildings [--upgradable]`
 
