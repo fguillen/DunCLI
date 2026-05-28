@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -121,6 +122,13 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 	st := theme.Active()
 	rl.SetPrompt(st.Prompt.Render(prompt))
 
+	// base drops the parent ctx's signal-cancellation (it keeps values
+	// and deadlines). readline owns Ctrl-C while reading; long-running
+	// verbs get their own per-command SIGINT scope below. Without this,
+	// a Ctrl-C delivered while a blocking verb runs would cancel the
+	// parent ctx permanently and poison every subsequent command.
+	base := context.WithoutCancel(ctx)
+
 	for {
 		line, err := rl.Readline()
 		switch {
@@ -138,7 +146,19 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 		if line == "" {
 			continue
 		}
-		if err := Dispatch(ctx, sess, line); errors.Is(err, ErrExit) {
+		// Remember the last command so `loop` can repeat it — but never
+		// record `loop` itself, or it would just repeat itself.
+		if firstToken(line) != "loop" {
+			sess.LastCommand = line
+		}
+		// Each command runs under a fresh SIGINT-cancellable context so a
+		// blocking verb (e.g. `loop`) can be interrupted with Ctrl-C
+		// without affecting the next command. stop() runs every
+		// iteration so the next command gets an uncancelled context.
+		cmdCtx, stop := signal.NotifyContext(base, os.Interrupt)
+		exit := errors.Is(Dispatch(cmdCtx, sess, line), ErrExit)
+		stop()
+		if exit {
 			_ = sess.State.Save(scope.Snapshot())
 			return nil
 		}
@@ -146,6 +166,17 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 		// session doesn't lose the most recent scope change.
 		_ = sess.State.Save(scope.Snapshot())
 	}
+}
+
+// firstToken returns the first whitespace-delimited token of line, or
+// "" when line is empty. Used to decide whether a typed line is a `loop`
+// invocation (which must not overwrite LastCommand).
+func firstToken(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // newStateStore returns the session-context store for the given mode:

@@ -239,6 +239,38 @@ dun> where
 - `kingdom` is your per-server handle, recorded by `profile set` and
   used as your kingdom's display name in every world on that server.
 
+### `loop [seconds]`
+
+Re-runs the **last command you typed** every `seconds` (default `5`),
+printing each run to scrollback below the previous one. Useful for
+watching a value change — e.g. an army's march ETA, a battle report, or
+the world map — without retyping the command.
+
+```
+dun> where
+  server:  acme
+  world:   spring-2026
+  kingdom: IronFist
+dun> loop 2
+Looping `where` every 2s — press Ctrl-C to stop.
+  server:  acme
+  world:   spring-2026
+  kingdom: IronFist
+────────────────
+  server:  acme
+  world:   spring-2026
+  kingdom: IronFist
+^C
+loop stopped
+```
+
+- The interval must be a positive whole number of seconds; `loop`
+  alone uses 5.
+- `loop` repeats the previous command, not itself — typing `loop`
+  twice still targets whatever you ran before the first `loop`.
+- Press **Ctrl-C** to stop and return to the prompt. If you haven't run
+  any command yet, `loop` reports `no previous command to repeat`.
+
 ## 7. Servers
 
 ### `servers` — list servers you can see

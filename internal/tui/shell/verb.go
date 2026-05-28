@@ -206,6 +206,11 @@ type Session struct {
 	// before the prompt loop starts. Verbs that mutate Context call
 	// Save() so the change survives a restart.
 	State StateStore
+
+	// LastCommand is the last line typed at the prompt, excluding `loop`
+	// itself. The `loop` built-in repeats it every N seconds. Set by the
+	// shell.Run prompt loop, never by programmatic Dispatch calls.
+	LastCommand string
 }
 
 // registry returns the verb registry backing this session's mode.

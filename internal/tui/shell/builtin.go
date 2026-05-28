@@ -2,10 +2,18 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/fguillen/dun-cli/internal/tui/theme"
 )
+
+// defaultLoopSeconds is the interval `loop` uses when called without an
+// explicit argument.
+const defaultLoopSeconds = 5
 
 // registerBuiltins is called by Run() before the prompt loop, against
 // whichever registry the active mode uses. The built-in verbs are
@@ -57,6 +65,13 @@ func registerBuiltins(reg *registry, version string) {
 			_, _ = fmt.Fprintln(sess.Out, st.Subtle.Render("  base_url: "+sess.Cfg.BaseURL))
 			return nil
 		},
+	})
+
+	reg.add(&Verb{
+		Name:    "loop",
+		Summary: "Re-run the last command every N seconds (Ctrl-C to stop)",
+		Usage:   "loop [seconds]   (default 5)",
+		Run:     runLoop,
 	})
 
 	reg.add(&Verb{
@@ -128,5 +143,50 @@ func runHelp(_ context.Context, sess *Session, args []string, _ map[string]strin
 			_, _ = fmt.Fprintf(sess.Out, "    --%s%s  %s\n", f.Name, suffix, f.Help)
 		}
 	}
+	return nil
+}
+
+// runLoop implements the `loop` verb: it re-runs the last typed command
+// (sess.LastCommand) every N seconds until the user presses Ctrl-C. The
+// ctx is the per-command SIGINT-scoped context the shell.Run loop wires
+// up, so it cancels on Ctrl-C without poisoning later commands.
+func runLoop(ctx context.Context, sess *Session, args []string, _ map[string]string) error {
+	seconds := defaultLoopSeconds
+	if len(args) > 0 {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n < 1 {
+			return errors.New("loop: seconds must be a positive whole number")
+		}
+		seconds = n
+	}
+
+	last := strings.TrimSpace(sess.LastCommand)
+	if last == "" {
+		return errors.New("loop: no previous command to repeat")
+	}
+
+	interval := time.Duration(seconds) * time.Second
+	st := theme.Active()
+	Info(sess.Out, fmt.Sprintf("Looping `%s` every %ds — press Ctrl-C to stop.", last, seconds))
+
+	first := true
+	for ctx.Err() == nil {
+		if !first {
+			_, _ = fmt.Fprintln(sess.Out, st.Hint.Render(strings.Repeat("─", 16)))
+		}
+		first = false
+		if errors.Is(Dispatch(ctx, sess, last), ErrExit) {
+			// The repeated command asked the shell to quit; honor it.
+			return ErrExit
+		}
+		select {
+		case <-ctx.Done():
+			// Ctrl-C during the wait — stop quietly.
+		case <-time.After(interval):
+			continue
+		}
+		break
+	}
+	Info(sess.Out, "loop stopped")
 	return nil
 }
