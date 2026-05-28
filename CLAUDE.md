@@ -235,6 +235,16 @@ OpenAPI 3.1 → 3.0.3 downgrade as precedent).
   pieces of work, split them into two commits. The wrap-up message
   to the user should quote the resulting commit hash + subject so
   they can `git show` it directly.
+- **Versioning**: the CLI version is a single semver constant —
+  `Version` in [cmd/dun/main.go](cmd/dun/main.go). **Bump it on every
+  change, in the same commit.** Magnitude follows the change's
+  conventional-commit type: `feat:` → minor, a breaking change → major,
+  everything else (`fix:`, `refactor:`, `perf:`, `docs:`, `chore:`,
+  `build:`, `test:`) → patch. No `-dev` suffix; at release `-ldflags`
+  may append the commit hash (see [TODO.md](TODO.md)). The value is
+  surfaced in three already-wired spots that all read this one constant:
+  the `dun version` subcommand, the in-shell `version` verb, and the
+  shell welcome line printed on startup.
 - **Dependencies**: ask before adding a new top-level dependency.
 - **Tutorial**: [docs/tutorial.md](docs/tutorial.md) is the user-facing
   walkthrough. **Whenever a phase ships a new user-visible verb,

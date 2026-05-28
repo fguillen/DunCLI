@@ -100,7 +100,7 @@ func Run(ctx context.Context, cfgBaseURL, credEmail string, client *api.Client, 
 	}
 
 	// Greeting.
-	Info(sess.Out, fmt.Sprintf("Connected to %s as %s", cfgBaseURL, credEmail))
+	Info(sess.Out, fmt.Sprintf("Connected to %s as %s (dun v%s)", cfgBaseURL, credEmail, opts.Version))
 
 	// Post-login server picker hook.
 	if opts.PostLoginPicker && postLoginPicker != nil {

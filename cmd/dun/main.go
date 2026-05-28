@@ -34,8 +34,10 @@ import (
 	_ "github.com/fguillen/dun-cli/internal/tui/verbs/wonders"
 )
 
-// Version is the CLI version string. Overridden via -ldflags at release time.
-const Version = "0.0.0-dev"
+// Version is the CLI version (semver). Bump it on every change per the
+// versioning convention in CLAUDE.md; at release -ldflags may append the
+// commit hash (see TODO.md).
+const Version = "0.1.0"
 
 func main() {
 	if err := newRootCmd(os.Stdout).Execute(); err != nil {
