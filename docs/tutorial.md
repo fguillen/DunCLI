@@ -139,7 +139,7 @@ prompt. The first line you'll see is the connectivity probe greeting:
 
 ```
 $ dun
-Connected to http://localhost:3000/v1 as alice@example.com
+Connected to http://localhost:3000/v1 as alice@example.com (dun v0.1.0)
 dun>
 ```
 
@@ -209,7 +209,8 @@ Clears the screen (sends `\033[H\033[2J`).
 
 ### `version`
 
-Prints the CLI version. Same value as `dun version`.
+Prints the CLI version — the same value shown by `dun version` and in the
+startup welcome line.
 
 ### `whoami`
 
@@ -817,33 +818,35 @@ error: not in a world scope — try `world join <slug>` first
 dun> armies
 Armies:
   Garrison          home        Greyhollow    cap=60    archer=3, levy=12
-  Vanguard          marching    Ironvale      cap=80    knight=4
+  Vanguard          marching    Ironvale      cap=80    knight=4    → Greyhollow attack ETA 2h 15m
 ```
 
 Columns: name, status (`home`, `marching`, `engaged`, `returning`),
 region name (resolved from the world map cache), total capacity, and a
-short composition summary.
+short composition summary. A `marching` or `returning` army also gets
+an inline march tail — `→ <target> <intent> ETA <remaining>` — so you
+can see where it's headed and when it lands without a second command.
 
 ### `army show <name>`
 
 ```
-dun> army show Garrison
-Garrison  (home)
-  id:        arm-1
-  location:  Greyhollow
-  capacity:  60
+dun> army show Vanguard
+Vanguard  (marching)
+  id:        arm-2
+  location:  Ironvale
+  capacity:  80
+March:
+  intent:    attack
+  target:    Greyhollow
+  arrives:   2026-05-28 18:25 UTC  (ETA 2h 15m)
 Composition:
-  archer       3
-  levy         12
+  knight       4
 ```
 
-The `status` field is the only signal that an army is on the move —
-the spec does not embed the active march, so use `where` together with
-`army show` to see what's going on.
-
-> Backend co-evolution candidate: an embedded `current_march` field on
-> `Army` would let `army show` render march detail without a second
-> call.
+The `March:` block appears only while the army has an active march
+(status `marching` or `returning`); a `home` army omits it. The target
+region and ETA come from the army's embedded `active_march`, so no
+follow-up call is needed.
 
 ### `army split <name>`
 
@@ -1978,7 +1981,7 @@ Email: boss@example.com
 Magic-link email sent. Check your inbox.
 Token: 7f3a8b2c9d1e4f6a
 Logged in as admin boss@example.com (expires 2026-08-17).
-Connected to http://localhost:3000/v1 as boss@example.com
+Connected to http://localhost:3000/v1 as boss@example.com (dun v0.1.0)
 dun-admin>
 ```
 
@@ -1997,7 +2000,7 @@ prompt:
 
 ```
 $ dun admin
-Connected to http://localhost:3000/v1 as boss@example.com
+Connected to http://localhost:3000/v1 as boss@example.com (dun v0.1.0)
 dun-admin>
 ```
 

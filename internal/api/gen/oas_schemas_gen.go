@@ -469,6 +469,11 @@ type Army struct {
 	LocationRegionID string      `json:"location_region_id"`
 	Composition      Composition `json:"composition"`
 	TotalCapacity    int         `json:"total_capacity"`
+	// The army's in-flight march. Present when status is `marching` or `returning` and an unresolved
+	// march order exists; null otherwise. Lets clients render an arrival ETA (e.g. "arrives 2h 15m")
+	// without a separate lookup, since there is no GET endpoint for marches. `intent` is
+	// `caravan_return` for the homebound leg of a delivered caravan's escort.
+	ActiveMarch OptNilArmyActiveMarch `json:"active_march"`
 }
 
 // GetID returns the value of ID.
@@ -506,6 +511,11 @@ func (s *Army) GetTotalCapacity() int {
 	return s.TotalCapacity
 }
 
+// GetActiveMarch returns the value of ActiveMarch.
+func (s *Army) GetActiveMarch() OptNilArmyActiveMarch {
+	return s.ActiveMarch
+}
+
 // SetID sets the value of ID.
 func (s *Army) SetID(val string) {
 	s.ID = val
@@ -541,9 +551,152 @@ func (s *Army) SetTotalCapacity(val int) {
 	s.TotalCapacity = val
 }
 
+// SetActiveMarch sets the value of ActiveMarch.
+func (s *Army) SetActiveMarch(val OptNilArmyActiveMarch) {
+	s.ActiveMarch = val
+}
+
 func (*Army) mergeArmyRes()  {}
 func (*Army) renameArmyRes() {}
 func (*Army) showArmyRes()   {}
+
+// The army's in-flight march. Present when status is `marching` or `returning` and an unresolved
+// march order exists; null otherwise. Lets clients render an arrival ETA (e.g. "arrives 2h 15m")
+// without a separate lookup, since there is no GET endpoint for marches. `intent` is
+// `caravan_return` for the homebound leg of a delivered caravan's escort.
+type ArmyActiveMarch struct {
+	MarchOrderID   OptString             `json:"march_order_id"`
+	Intent         ArmyActiveMarchIntent `json:"intent"`
+	TargetRegionID string                `json:"target_region_id"`
+	ArrivesAt      time.Time             `json:"arrives_at"`
+	DispatchedAt   OptDateTime           `json:"dispatched_at"`
+}
+
+// GetMarchOrderID returns the value of MarchOrderID.
+func (s *ArmyActiveMarch) GetMarchOrderID() OptString {
+	return s.MarchOrderID
+}
+
+// GetIntent returns the value of Intent.
+func (s *ArmyActiveMarch) GetIntent() ArmyActiveMarchIntent {
+	return s.Intent
+}
+
+// GetTargetRegionID returns the value of TargetRegionID.
+func (s *ArmyActiveMarch) GetTargetRegionID() string {
+	return s.TargetRegionID
+}
+
+// GetArrivesAt returns the value of ArrivesAt.
+func (s *ArmyActiveMarch) GetArrivesAt() time.Time {
+	return s.ArrivesAt
+}
+
+// GetDispatchedAt returns the value of DispatchedAt.
+func (s *ArmyActiveMarch) GetDispatchedAt() OptDateTime {
+	return s.DispatchedAt
+}
+
+// SetMarchOrderID sets the value of MarchOrderID.
+func (s *ArmyActiveMarch) SetMarchOrderID(val OptString) {
+	s.MarchOrderID = val
+}
+
+// SetIntent sets the value of Intent.
+func (s *ArmyActiveMarch) SetIntent(val ArmyActiveMarchIntent) {
+	s.Intent = val
+}
+
+// SetTargetRegionID sets the value of TargetRegionID.
+func (s *ArmyActiveMarch) SetTargetRegionID(val string) {
+	s.TargetRegionID = val
+}
+
+// SetArrivesAt sets the value of ArrivesAt.
+func (s *ArmyActiveMarch) SetArrivesAt(val time.Time) {
+	s.ArrivesAt = val
+}
+
+// SetDispatchedAt sets the value of DispatchedAt.
+func (s *ArmyActiveMarch) SetDispatchedAt(val OptDateTime) {
+	s.DispatchedAt = val
+}
+
+type ArmyActiveMarchIntent string
+
+const (
+	ArmyActiveMarchIntentAttack        ArmyActiveMarchIntent = "attack"
+	ArmyActiveMarchIntentReinforce     ArmyActiveMarchIntent = "reinforce"
+	ArmyActiveMarchIntentScout         ArmyActiveMarchIntent = "scout"
+	ArmyActiveMarchIntentCapture       ArmyActiveMarchIntent = "capture"
+	ArmyActiveMarchIntentClaimRuin     ArmyActiveMarchIntent = "claim_ruin"
+	ArmyActiveMarchIntentCaravan       ArmyActiveMarchIntent = "caravan"
+	ArmyActiveMarchIntentCaravanReturn ArmyActiveMarchIntent = "caravan_return"
+)
+
+// AllValues returns all ArmyActiveMarchIntent values.
+func (ArmyActiveMarchIntent) AllValues() []ArmyActiveMarchIntent {
+	return []ArmyActiveMarchIntent{
+		ArmyActiveMarchIntentAttack,
+		ArmyActiveMarchIntentReinforce,
+		ArmyActiveMarchIntentScout,
+		ArmyActiveMarchIntentCapture,
+		ArmyActiveMarchIntentClaimRuin,
+		ArmyActiveMarchIntentCaravan,
+		ArmyActiveMarchIntentCaravanReturn,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ArmyActiveMarchIntent) MarshalText() ([]byte, error) {
+	switch s {
+	case ArmyActiveMarchIntentAttack:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentReinforce:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentScout:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentCapture:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentClaimRuin:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentCaravan:
+		return []byte(s), nil
+	case ArmyActiveMarchIntentCaravanReturn:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ArmyActiveMarchIntent) UnmarshalText(data []byte) error {
+	switch ArmyActiveMarchIntent(data) {
+	case ArmyActiveMarchIntentAttack:
+		*s = ArmyActiveMarchIntentAttack
+		return nil
+	case ArmyActiveMarchIntentReinforce:
+		*s = ArmyActiveMarchIntentReinforce
+		return nil
+	case ArmyActiveMarchIntentScout:
+		*s = ArmyActiveMarchIntentScout
+		return nil
+	case ArmyActiveMarchIntentCapture:
+		*s = ArmyActiveMarchIntentCapture
+		return nil
+	case ArmyActiveMarchIntentClaimRuin:
+		*s = ArmyActiveMarchIntentClaimRuin
+		return nil
+	case ArmyActiveMarchIntentCaravan:
+		*s = ArmyActiveMarchIntentCaravan
+		return nil
+	case ArmyActiveMarchIntentCaravanReturn:
+		*s = ArmyActiveMarchIntentCaravanReturn
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 type ArmyStatus string
 
@@ -4579,6 +4732,30 @@ type ListWorldInvitationsUnauthorized ErrorEnvelope
 
 func (*ListWorldInvitationsUnauthorized) listWorldInvitationsRes() {}
 
+type ListWorldKingdomsNotFound ErrorEnvelope
+
+func (*ListWorldKingdomsNotFound) listWorldKingdomsRes() {}
+
+type ListWorldKingdomsOK struct {
+	Kingdoms []WorldKingdomEntry `json:"kingdoms"`
+}
+
+// GetKingdoms returns the value of Kingdoms.
+func (s *ListWorldKingdomsOK) GetKingdoms() []WorldKingdomEntry {
+	return s.Kingdoms
+}
+
+// SetKingdoms sets the value of Kingdoms.
+func (s *ListWorldKingdomsOK) SetKingdoms(val []WorldKingdomEntry) {
+	s.Kingdoms = val
+}
+
+func (*ListWorldKingdomsOK) listWorldKingdomsRes() {}
+
+type ListWorldKingdomsUnauthorized ErrorEnvelope
+
+func (*ListWorldKingdomsUnauthorized) listWorldKingdomsRes() {}
+
 type ListWorldWondersNotFound ErrorEnvelope
 
 func (*ListWorldWondersNotFound) listWorldWondersRes() {}
@@ -5123,8 +5300,10 @@ type Node struct {
 	IsHomeHoard    bool         `json:"is_home_hoard"`
 	BaseRate       OptInt       `json:"base_rate"`
 	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
-	RegionID       OptString    `json:"region_id"`
-	RegionName     OptString    `json:"region_name"`
+	// Handle of the owning kingdom's player. Null when the node is wilderness.
+	OwnerHandle OptNilString `json:"owner_handle"`
+	RegionID    OptString    `json:"region_id"`
+	RegionName  OptString    `json:"region_name"`
 	// Wilderness garrison composition. Empty hash after capture (one-time per §16.5).
 	Garrison OptNodeGarrison `json:"garrison"`
 }
@@ -5157,6 +5336,11 @@ func (s *Node) GetBaseRate() OptInt {
 // GetOwnerKingdomID returns the value of OwnerKingdomID.
 func (s *Node) GetOwnerKingdomID() OptNilString {
 	return s.OwnerKingdomID
+}
+
+// GetOwnerHandle returns the value of OwnerHandle.
+func (s *Node) GetOwnerHandle() OptNilString {
+	return s.OwnerHandle
 }
 
 // GetRegionID returns the value of RegionID.
@@ -5202,6 +5386,11 @@ func (s *Node) SetBaseRate(val OptInt) {
 // SetOwnerKingdomID sets the value of OwnerKingdomID.
 func (s *Node) SetOwnerKingdomID(val OptNilString) {
 	s.OwnerKingdomID = val
+}
+
+// SetOwnerHandle sets the value of OwnerHandle.
+func (s *Node) SetOwnerHandle(val OptNilString) {
+	s.OwnerHandle = val
 }
 
 // SetRegionID sets the value of RegionID.
@@ -5916,6 +6105,69 @@ func (o OptNilArmy) Or(d Army) Army {
 	return d
 }
 
+// NewOptNilArmyActiveMarch returns new OptNilArmyActiveMarch with value set to v.
+func NewOptNilArmyActiveMarch(v ArmyActiveMarch) OptNilArmyActiveMarch {
+	return OptNilArmyActiveMarch{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilArmyActiveMarch is optional nullable ArmyActiveMarch.
+type OptNilArmyActiveMarch struct {
+	Value ArmyActiveMarch
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilArmyActiveMarch was set.
+func (o OptNilArmyActiveMarch) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilArmyActiveMarch) Reset() {
+	var v ArmyActiveMarch
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilArmyActiveMarch) SetTo(v ArmyActiveMarch) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilArmyActiveMarch) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilArmyActiveMarch) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v ArmyActiveMarch
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilArmyActiveMarch) Get() (v ArmyActiveMarch, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilArmyActiveMarch) Or(d ArmyActiveMarch) ArmyActiveMarch {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilDateTime returns new OptNilDateTime with value set to v.
 func NewOptNilDateTime(v time.Time) OptNilDateTime {
 	return OptNilDateTime{
@@ -6351,6 +6603,69 @@ func (o OptNilWonderPendingMilestonePercent) Get() (v WonderPendingMilestonePerc
 
 // Or returns value if set, or given parameter if does not.
 func (o OptNilWonderPendingMilestonePercent) Or(d WonderPendingMilestonePercent) WonderPendingMilestonePercent {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilWorldKingdomEntryWonder returns new OptNilWorldKingdomEntryWonder with value set to v.
+func NewOptNilWorldKingdomEntryWonder(v WorldKingdomEntryWonder) OptNilWorldKingdomEntryWonder {
+	return OptNilWorldKingdomEntryWonder{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilWorldKingdomEntryWonder is optional nullable WorldKingdomEntryWonder.
+type OptNilWorldKingdomEntryWonder struct {
+	Value WorldKingdomEntryWonder
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilWorldKingdomEntryWonder was set.
+func (o OptNilWorldKingdomEntryWonder) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilWorldKingdomEntryWonder) Reset() {
+	var v WorldKingdomEntryWonder
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilWorldKingdomEntryWonder) SetTo(v WorldKingdomEntryWonder) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilWorldKingdomEntryWonder) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilWorldKingdomEntryWonder) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v WorldKingdomEntryWonder
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilWorldKingdomEntryWonder) Get() (v WorldKingdomEntryWonder, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilWorldKingdomEntryWonder) Or(d WorldKingdomEntryWonder) WorldKingdomEntryWonder {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -7444,16 +7759,19 @@ func (*RecallMarchUnprocessableEntity) recallMarchRes() {}
 
 // Ref: #/components/schemas/Region
 type Region struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	Terrain        RegionTerrain `json:"terrain"`
-	Position       Position      `json:"position"`
-	IsHub          OptBool       `json:"is_hub"`
-	SpawnEligible  OptBool       `json:"spawn_eligible"`
-	Adjacency      []string      `json:"adjacency"`
-	Nodes          []Node        `json:"nodes"`
-	Ruin           OptNilRuin    `json:"ruin"`
-	OwnerKingdomID OptNilString  `json:"owner_kingdom_id"`
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	Terrain       RegionTerrain `json:"terrain"`
+	Position      Position      `json:"position"`
+	IsHub         OptBool       `json:"is_hub"`
+	SpawnEligible OptBool       `json:"spawn_eligible"`
+	Adjacency     []string      `json:"adjacency"`
+	Nodes         []Node        `json:"nodes"`
+	Ruin          OptNilRuin    `json:"ruin"`
+	// Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
+	// Handle of the owning kingdom's player. Null when the region is unclaimed.
+	OwnerHandle OptNilString `json:"owner_handle"`
 }
 
 // GetID returns the value of ID.
@@ -7506,6 +7824,11 @@ func (s *Region) GetOwnerKingdomID() OptNilString {
 	return s.OwnerKingdomID
 }
 
+// GetOwnerHandle returns the value of OwnerHandle.
+func (s *Region) GetOwnerHandle() OptNilString {
+	return s.OwnerHandle
+}
+
 // SetID sets the value of ID.
 func (s *Region) SetID(val string) {
 	s.ID = val
@@ -7556,6 +7879,11 @@ func (s *Region) SetOwnerKingdomID(val OptNilString) {
 	s.OwnerKingdomID = val
 }
 
+// SetOwnerHandle sets the value of OwnerHandle.
+func (s *Region) SetOwnerHandle(val OptNilString) {
+	s.OwnerHandle = val
+}
+
 func (*Region) showRegionRes() {}
 
 // Ref: #/components/schemas/RegionSummary
@@ -7567,9 +7895,13 @@ type RegionSummary struct {
 	IsHub         OptBool              `json:"is_hub"`
 	SpawnEligible OptBool              `json:"spawn_eligible"`
 	YourSpawn     OptBool              `json:"your_spawn"`
-	Adjacency     []string             `json:"adjacency"`
-	Nodes         []NodeSummary        `json:"nodes"`
-	Ruin          OptNilRuinSummary    `json:"ruin"`
+	// Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
+	// Handle of the owning kingdom's player. Null when the region is unclaimed.
+	OwnerHandle OptNilString      `json:"owner_handle"`
+	Adjacency   []string          `json:"adjacency"`
+	Nodes       []NodeSummary     `json:"nodes"`
+	Ruin        OptNilRuinSummary `json:"ruin"`
 }
 
 // GetID returns the value of ID.
@@ -7605,6 +7937,16 @@ func (s *RegionSummary) GetSpawnEligible() OptBool {
 // GetYourSpawn returns the value of YourSpawn.
 func (s *RegionSummary) GetYourSpawn() OptBool {
 	return s.YourSpawn
+}
+
+// GetOwnerKingdomID returns the value of OwnerKingdomID.
+func (s *RegionSummary) GetOwnerKingdomID() OptNilString {
+	return s.OwnerKingdomID
+}
+
+// GetOwnerHandle returns the value of OwnerHandle.
+func (s *RegionSummary) GetOwnerHandle() OptNilString {
+	return s.OwnerHandle
 }
 
 // GetAdjacency returns the value of Adjacency.
@@ -7655,6 +7997,16 @@ func (s *RegionSummary) SetSpawnEligible(val OptBool) {
 // SetYourSpawn sets the value of YourSpawn.
 func (s *RegionSummary) SetYourSpawn(val OptBool) {
 	s.YourSpawn = val
+}
+
+// SetOwnerKingdomID sets the value of OwnerKingdomID.
+func (s *RegionSummary) SetOwnerKingdomID(val OptNilString) {
+	s.OwnerKingdomID = val
+}
+
+// SetOwnerHandle sets the value of OwnerHandle.
+func (s *RegionSummary) SetOwnerHandle(val OptNilString) {
+	s.OwnerHandle = val
 }
 
 // SetAdjacency sets the value of Adjacency.
@@ -10730,6 +11082,236 @@ func (s *WorldInvitation) SetCreatedAt(val time.Time) {
 }
 
 func (*WorldInvitation) createWorldInvitationRes() {}
+
+// Compact public roster entry for a kingdom (`GET /worlds/{world_id}/kingdoms`).
+// Ref: #/components/schemas/WorldKingdomEntry
+type WorldKingdomEntry struct {
+	KingdomID string `json:"kingdom_id"`
+	Handle    string `json:"handle"`
+	// Inline cross-round reputation title, e.g. "[Champion of Mirkwood]". Null if untitled.
+	Title OptNilString `json:"title"`
+	// True for the requesting player's own kingdom.
+	IsYou bool `json:"is_you"`
+	// Null while the kingdom is a stub (world not yet started).
+	HomeRegionID   OptNilString `json:"home_region_id"`
+	HomeRegionName OptNilString `json:"home_region_name"`
+	// Count of nodes owned, including the home hoard.
+	NodesControlled int `json:"nodes_controlled"`
+	RuinsClaimed    int `json:"ruins_claimed"`
+	// Coarse Wonder progress; null if the kingdom has no Wonder.
+	Wonder     OptNilWorldKingdomEntryWonder `json:"wonder"`
+	Eliminated bool                          `json:"eliminated"`
+	JoinedAt   time.Time                     `json:"joined_at"`
+}
+
+// GetKingdomID returns the value of KingdomID.
+func (s *WorldKingdomEntry) GetKingdomID() string {
+	return s.KingdomID
+}
+
+// GetHandle returns the value of Handle.
+func (s *WorldKingdomEntry) GetHandle() string {
+	return s.Handle
+}
+
+// GetTitle returns the value of Title.
+func (s *WorldKingdomEntry) GetTitle() OptNilString {
+	return s.Title
+}
+
+// GetIsYou returns the value of IsYou.
+func (s *WorldKingdomEntry) GetIsYou() bool {
+	return s.IsYou
+}
+
+// GetHomeRegionID returns the value of HomeRegionID.
+func (s *WorldKingdomEntry) GetHomeRegionID() OptNilString {
+	return s.HomeRegionID
+}
+
+// GetHomeRegionName returns the value of HomeRegionName.
+func (s *WorldKingdomEntry) GetHomeRegionName() OptNilString {
+	return s.HomeRegionName
+}
+
+// GetNodesControlled returns the value of NodesControlled.
+func (s *WorldKingdomEntry) GetNodesControlled() int {
+	return s.NodesControlled
+}
+
+// GetRuinsClaimed returns the value of RuinsClaimed.
+func (s *WorldKingdomEntry) GetRuinsClaimed() int {
+	return s.RuinsClaimed
+}
+
+// GetWonder returns the value of Wonder.
+func (s *WorldKingdomEntry) GetWonder() OptNilWorldKingdomEntryWonder {
+	return s.Wonder
+}
+
+// GetEliminated returns the value of Eliminated.
+func (s *WorldKingdomEntry) GetEliminated() bool {
+	return s.Eliminated
+}
+
+// GetJoinedAt returns the value of JoinedAt.
+func (s *WorldKingdomEntry) GetJoinedAt() time.Time {
+	return s.JoinedAt
+}
+
+// SetKingdomID sets the value of KingdomID.
+func (s *WorldKingdomEntry) SetKingdomID(val string) {
+	s.KingdomID = val
+}
+
+// SetHandle sets the value of Handle.
+func (s *WorldKingdomEntry) SetHandle(val string) {
+	s.Handle = val
+}
+
+// SetTitle sets the value of Title.
+func (s *WorldKingdomEntry) SetTitle(val OptNilString) {
+	s.Title = val
+}
+
+// SetIsYou sets the value of IsYou.
+func (s *WorldKingdomEntry) SetIsYou(val bool) {
+	s.IsYou = val
+}
+
+// SetHomeRegionID sets the value of HomeRegionID.
+func (s *WorldKingdomEntry) SetHomeRegionID(val OptNilString) {
+	s.HomeRegionID = val
+}
+
+// SetHomeRegionName sets the value of HomeRegionName.
+func (s *WorldKingdomEntry) SetHomeRegionName(val OptNilString) {
+	s.HomeRegionName = val
+}
+
+// SetNodesControlled sets the value of NodesControlled.
+func (s *WorldKingdomEntry) SetNodesControlled(val int) {
+	s.NodesControlled = val
+}
+
+// SetRuinsClaimed sets the value of RuinsClaimed.
+func (s *WorldKingdomEntry) SetRuinsClaimed(val int) {
+	s.RuinsClaimed = val
+}
+
+// SetWonder sets the value of Wonder.
+func (s *WorldKingdomEntry) SetWonder(val OptNilWorldKingdomEntryWonder) {
+	s.Wonder = val
+}
+
+// SetEliminated sets the value of Eliminated.
+func (s *WorldKingdomEntry) SetEliminated(val bool) {
+	s.Eliminated = val
+}
+
+// SetJoinedAt sets the value of JoinedAt.
+func (s *WorldKingdomEntry) SetJoinedAt(val time.Time) {
+	s.JoinedAt = val
+}
+
+// Coarse Wonder progress; null if the kingdom has no Wonder.
+type WorldKingdomEntryWonder struct {
+	Name   string                        `json:"name"`
+	Status WorldKingdomEntryWonderStatus `json:"status"`
+	HpPct  int                           `json:"hp_pct"`
+}
+
+// GetName returns the value of Name.
+func (s *WorldKingdomEntryWonder) GetName() string {
+	return s.Name
+}
+
+// GetStatus returns the value of Status.
+func (s *WorldKingdomEntryWonder) GetStatus() WorldKingdomEntryWonderStatus {
+	return s.Status
+}
+
+// GetHpPct returns the value of HpPct.
+func (s *WorldKingdomEntryWonder) GetHpPct() int {
+	return s.HpPct
+}
+
+// SetName sets the value of Name.
+func (s *WorldKingdomEntryWonder) SetName(val string) {
+	s.Name = val
+}
+
+// SetStatus sets the value of Status.
+func (s *WorldKingdomEntryWonder) SetStatus(val WorldKingdomEntryWonderStatus) {
+	s.Status = val
+}
+
+// SetHpPct sets the value of HpPct.
+func (s *WorldKingdomEntryWonder) SetHpPct(val int) {
+	s.HpPct = val
+}
+
+type WorldKingdomEntryWonderStatus string
+
+const (
+	WorldKingdomEntryWonderStatusFoundation   WorldKingdomEntryWonderStatus = "foundation"
+	WorldKingdomEntryWonderStatusConstruction WorldKingdomEntryWonderStatus = "construction"
+	WorldKingdomEntryWonderStatusConsecration WorldKingdomEntryWonderStatus = "consecration"
+	WorldKingdomEntryWonderStatusCompleted    WorldKingdomEntryWonderStatus = "completed"
+	WorldKingdomEntryWonderStatusDestroyed    WorldKingdomEntryWonderStatus = "destroyed"
+)
+
+// AllValues returns all WorldKingdomEntryWonderStatus values.
+func (WorldKingdomEntryWonderStatus) AllValues() []WorldKingdomEntryWonderStatus {
+	return []WorldKingdomEntryWonderStatus{
+		WorldKingdomEntryWonderStatusFoundation,
+		WorldKingdomEntryWonderStatusConstruction,
+		WorldKingdomEntryWonderStatusConsecration,
+		WorldKingdomEntryWonderStatusCompleted,
+		WorldKingdomEntryWonderStatusDestroyed,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s WorldKingdomEntryWonderStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case WorldKingdomEntryWonderStatusFoundation:
+		return []byte(s), nil
+	case WorldKingdomEntryWonderStatusConstruction:
+		return []byte(s), nil
+	case WorldKingdomEntryWonderStatusConsecration:
+		return []byte(s), nil
+	case WorldKingdomEntryWonderStatusCompleted:
+		return []byte(s), nil
+	case WorldKingdomEntryWonderStatusDestroyed:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *WorldKingdomEntryWonderStatus) UnmarshalText(data []byte) error {
+	switch WorldKingdomEntryWonderStatus(data) {
+	case WorldKingdomEntryWonderStatusFoundation:
+		*s = WorldKingdomEntryWonderStatusFoundation
+		return nil
+	case WorldKingdomEntryWonderStatusConstruction:
+		*s = WorldKingdomEntryWonderStatusConstruction
+		return nil
+	case WorldKingdomEntryWonderStatusConsecration:
+		*s = WorldKingdomEntryWonderStatusConsecration
+		return nil
+	case WorldKingdomEntryWonderStatusCompleted:
+		*s = WorldKingdomEntryWonderStatusCompleted
+		return nil
+	case WorldKingdomEntryWonderStatusDestroyed:
+		*s = WorldKingdomEntryWonderStatusDestroyed
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 type WorldStatus string
 

@@ -17,7 +17,10 @@ const armiesListBody = `{"armies": [
 	 "total_capacity": 60},
 	{"id": "arm-2", "kingdom_id": "kgd-7", "name": "Vanguard", "status": "marching",
 	 "location_region_id": "reg-2", "composition": {"knight": 4},
-	 "total_capacity": 80}
+	 "total_capacity": 80,
+	 "active_march": {"march_order_id": "mo-9", "intent": "attack",
+	  "target_region_id": "reg-1", "arrives_at": "2030-01-01T00:00:00Z",
+	  "dispatched_at": "2026-05-28T18:25:23Z"}}
 ]}`
 
 func TestRunArmiesList_rendersTable(t *testing.T) {
@@ -33,6 +36,35 @@ func TestRunArmiesList_rendersTable(t *testing.T) {
 	require.Contains(t, got, "Vanguard")
 	require.Contains(t, got, "Greyhollow") // region name resolved from reg-1
 	require.Contains(t, got, "marching")
+	// Vanguard's active march surfaces inline: target (Greyhollow,
+	// resolved from reg-1), intent, and the ETA marker.
+	require.Contains(t, got, "→ Greyhollow attack ETA")
+}
+
+func TestRunArmyShow_rendersActiveMarch(t *testing.T) {
+	extra := map[string]http.HandlerFunc{
+		"/v1/kingdoms/kgd-7/armies": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(armiesListBody))
+		},
+		"/v1/armies/arm-2": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{
+				"id": "arm-2", "kingdom_id": "kgd-7", "name": "Vanguard", "status": "marching",
+				"location_region_id": "reg-2", "composition": {"knight": 4},
+				"total_capacity": 80,
+				"active_march": {"march_order_id": "mo-9", "intent": "attack",
+					"target_region_id": "reg-1", "arrives_at": "2030-01-01T00:00:00Z",
+					"dispatched_at": "2026-05-28T18:25:23Z"}
+			}`))
+		},
+	}
+	sess, out := setupMilitarySession(t, extra)
+	require.NoError(t, runArmyShow(context.Background(), sess, []string{"Vanguard"}, nil))
+	got := out.String()
+	require.Contains(t, got, "March:")
+	require.Contains(t, got, "intent:    attack")
+	require.Contains(t, got, "target:    Greyhollow") // resolved from reg-1
+	require.Contains(t, got, "arrives:")
+	require.Contains(t, got, "ETA")
 }
 
 func TestRunArmyShow_resolvesNameAndRendersComposition(t *testing.T) {

@@ -46,6 +46,7 @@ const (
 	ListTradeLedgerOperation         OperationName = "ListTradeLedger"
 	ListWorldBattlesOperation        OperationName = "ListWorldBattles"
 	ListWorldInvitationsOperation    OperationName = "ListWorldInvitations"
+	ListWorldKingdomsOperation       OperationName = "ListWorldKingdoms"
 	ListWorldWondersOperation        OperationName = "ListWorldWonders"
 	MergeArmyOperation               OperationName = "MergeArmy"
 	PayWonderMilestoneOperation      OperationName = "PayWonderMilestone"

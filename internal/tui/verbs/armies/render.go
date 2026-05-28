@@ -127,16 +127,41 @@ func printTrainCatalog(sess *shell.Session, c *gen.TrainingCatalog) {
 	}
 }
 
+// marchSuffix renders the inline "→ Target intent ETA 2h 15m" tail for
+// a marching/returning army. Empty string when there is no active march.
+func marchSuffix(a *gen.Army, regionNameByID map[string]string) string {
+	am, ok := a.ActiveMarch.Get()
+	if !ok {
+		return ""
+	}
+	target := regionNameByID[am.TargetRegionID]
+	if target == "" {
+		target = am.TargetRegionID
+	}
+	return fmt.Sprintf("  → %s %s ETA %s", target, string(am.Intent), shared.RelTime(am.ArrivesAt))
+}
+
 // printArmy is the long form of one army for `army show`.
-func printArmy(sess *shell.Session, a *gen.Army, regionName string) {
+func printArmy(sess *shell.Session, a *gen.Army, regionNameByID map[string]string) {
 	shell.Strong(sess.Out, a.Name+"  ("+string(a.Status)+")")
-	loc := regionName
+	loc := regionNameByID[a.LocationRegionID]
 	if loc == "" {
 		loc = a.LocationRegionID
 	}
 	_, _ = fmt.Fprintf(sess.Out, "  id:        %s\n", a.ID)
 	_, _ = fmt.Fprintf(sess.Out, "  location:  %s\n", loc)
 	_, _ = fmt.Fprintf(sess.Out, "  capacity:  %d\n", a.TotalCapacity)
+	if am, ok := a.ActiveMarch.Get(); ok {
+		target := regionNameByID[am.TargetRegionID]
+		if target == "" {
+			target = am.TargetRegionID
+		}
+		shell.Strong(sess.Out, "March:")
+		_, _ = fmt.Fprintf(sess.Out, "  intent:    %s\n", string(am.Intent))
+		_, _ = fmt.Fprintf(sess.Out, "  target:    %s\n", target)
+		_, _ = fmt.Fprintf(sess.Out, "  arrives:   %s  (ETA %s)\n",
+			am.ArrivesAt.Format("2006-01-02 15:04 MST"), shared.RelTime(am.ArrivesAt))
+	}
 	if len(a.Composition) == 0 {
 		shell.Section(sess.Out, "Composition:", "")
 		return
@@ -170,8 +195,9 @@ func printArmyList(sess *shell.Session, list []gen.Army, regionNameByID map[stri
 		if loc == "" {
 			loc = a.LocationRegionID
 		}
-		lines = append(lines, fmt.Sprintf("%-16s  %-10s  %-12s  cap=%-4d  %s",
-			a.Name, string(a.Status), loc, a.TotalCapacity, compositionString(a.Composition)))
+		lines = append(lines, fmt.Sprintf("%-16s  %-10s  %-12s  cap=%-4d  %s%s",
+			a.Name, string(a.Status), loc, a.TotalCapacity, compositionString(a.Composition),
+			marchSuffix(&a, regionNameByID)))
 	}
 	shell.Section(sess.Out, "Armies:", strings.Join(lines, "\n"))
 }

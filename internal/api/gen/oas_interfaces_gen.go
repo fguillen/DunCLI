@@ -157,6 +157,10 @@ type ListWorldInvitationsRes interface {
 	listWorldInvitationsRes()
 }
 
+type ListWorldKingdomsRes interface {
+	listWorldKingdomsRes()
+}
+
 type ListWorldWondersRes interface {
 	listWorldWondersRes()
 }

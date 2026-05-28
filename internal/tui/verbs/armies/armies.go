@@ -98,7 +98,8 @@ func runArmyShow(ctx context.Context, sess *shell.Session, args []string, _ map[
 	if err != nil {
 		return err
 	}
-	printArmy(sess, a, shared.LookupRegionName(ctx, sess, a.LocationRegionID))
+	regionNames := shared.RegionNameMap(ctx, sess)
+	printArmy(sess, a, regionNames)
 	return nil
 }
 
