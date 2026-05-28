@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.1.0"
+  version: "1.0.0-phase9"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -2285,37 +2285,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /worlds/{world_id}/kingdoms:
-    parameters:
-      - in: path
-        name: world_id
-        required: true
-        schema: { type: string }
-    get:
-      operationId: listWorldKingdoms
-      tags: [Player worlds]
-      summary: Public roster of kingdoms in the world
-      description: |
-        Every kingdom in the world with coarse, always-visible progress: handle,
-        home region, territory counts, Wonder summary, and cross-round title.
-        Detailed intel (stockpiles, buildings, armies, queues) stays scout-only
-        per §16.9. Ordered by join time. Visible to any member of the world's server.
-      security: [{ playerBearer: [] }]
-      responses:
-        "200":
-          description: Kingdom roster.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [kingdoms]
-                properties:
-                  kingdoms:
-                    type: array
-                    items: { $ref: "#/components/schemas/WorldKingdomEntry" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/NotFound" }
-
 # ═══════════════════════════════════════════════════════════════════════════════
 
 components:
@@ -2698,44 +2667,6 @@ components:
           description: Per-resource integer stockpiles plus `checkpoint_at`.
         joined_at: { type: string, format: date-time }
 
-    WorldKingdomEntry:
-      type: object
-      description: Compact public roster entry for a kingdom (`GET /worlds/{world_id}/kingdoms`).
-      required: [kingdom_id, handle, is_you, nodes_controlled, ruins_claimed, eliminated, joined_at]
-      properties:
-        kingdom_id: { type: string }
-        handle: { type: string }
-        title:
-          type: string
-          nullable: true
-          description: Inline cross-round reputation title, e.g. "[Champion of Mirkwood]". Null if untitled.
-        is_you:
-          type: boolean
-          description: True for the requesting player's own kingdom.
-        home_region_id:
-          type: string
-          nullable: true
-          description: Null while the kingdom is a stub (world not yet started).
-        home_region_name: { type: string, nullable: true }
-        nodes_controlled:
-          type: integer
-          minimum: 0
-          description: Count of nodes owned, including the home hoard.
-        ruins_claimed: { type: integer, minimum: 0 }
-        wonder:
-          type: object
-          nullable: true
-          description: Coarse Wonder progress; null if the kingdom has no Wonder.
-          required: [name, status, hp_pct]
-          properties:
-            name: { type: string }
-            status:
-              type: string
-              enum: [foundation, construction, consecration, completed, destroyed]
-            hp_pct: { type: integer, minimum: 0, maximum: 100 }
-        eliminated: { type: boolean }
-        joined_at: { type: string, format: date-time }
-
     Position:
       type: object
       description: Normalized [0, 1] coordinates from blue-noise sampling at map generation.
@@ -2760,10 +2691,6 @@ components:
           properties:
             base_rate: { type: integer }
             owner_kingdom_id: { type: string, nullable: true }
-            owner_handle:
-              type: string
-              nullable: true
-              description: Handle of the owning kingdom's player. Null when the node is wilderness.
             region_id: { type: string }
             region_name: { type: string }
             garrison:
@@ -2808,14 +2735,6 @@ components:
         is_hub: { type: boolean }
         spawn_eligible: { type: boolean }
         your_spawn: { type: boolean }
-        owner_kingdom_id:
-          type: string
-          nullable: true
-          description: Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
-        owner_handle:
-          type: string
-          nullable: true
-          description: Handle of the owning kingdom's player. Null when the region is unclaimed.
         adjacency:
           type: array
           items: { type: string }
@@ -2849,14 +2768,7 @@ components:
           nullable: true
           allOf:
             - { $ref: "#/components/schemas/Ruin" }
-        owner_kingdom_id:
-          type: string
-          nullable: true
-          description: Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
-        owner_handle:
-          type: string
-          nullable: true
-          description: Handle of the owning kingdom's player. Null when the region is unclaimed.
+        owner_kingdom_id: { type: string, nullable: true }
 
     WorldInvitation:
       type: object

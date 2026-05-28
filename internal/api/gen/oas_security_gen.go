@@ -89,7 +89,6 @@ var operationRolesPlayerBearer = map[string][]string{
 	ListRuinsOperation:            []string{},
 	ListServerWorldsOperation:     []string{},
 	ListTradeLedgerOperation:      []string{},
-	ListWorldKingdomsOperation:    []string{},
 	ListWorldWondersOperation:     []string{},
 	MergeArmyOperation:            []string{},
 	PayWonderMilestoneOperation:   []string{},
