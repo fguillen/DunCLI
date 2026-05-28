@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.2.0"
+  version: "1.3.0"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -1398,6 +1398,15 @@ paths:
           description: |
             `army_not_home`, `world_not_active`, `invalid_intent`,
             `army_empty`, `cross_world`, `unreachable`.
+
+            Capture/attack feasibility is checked at dispatch, so an impossible
+            march is rejected up front (it never sets out) with one of:
+            `catapult_required` (capture without a Catapult),
+            `no_capturable_node` (capture targets a region with no node),
+            `self_capture` (capture targets a node you already own),
+            `home_hoard_protected` (capture targets another kingdom's home-hoard,
+            which can never be seized), `self_attack` (raid targets your own home
+            region).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -2449,6 +2458,11 @@ components:
                 - `cross_world` — origin and destination are in different worlds
                 - `world_not_active` — the world is not in its active phase
                 - `march_already_resolved` — the march has already arrived; cannot be recalled
+                - `catapult_required` — a `capture` march needs at least one Catapult in the army
+                - `no_capturable_node` — a `capture` march targets a region with no node
+                - `self_capture` — a `capture` march targets a node the kingdom already owns
+                - `home_hoard_protected` — a `capture` march targets another kingdom's home-hoard, which can never be seized
+                - `self_attack` — an `attack` (raid) march targets the kingdom's own home region
 
                 **Trade & caravans**
                 - `invalid_payload` — the caravan payload is not valid
@@ -2751,7 +2765,13 @@ components:
         id: { type: string }
         resource: { type: string, enum: [gold, wood, stone, iron] }
         tier: { type: string, enum: [poor, standard, rich] }
-        is_home_hoard: { type: boolean }
+        is_home_hoard:
+          type: boolean
+          description: >-
+            True for the resource node placed in a kingdom's spawn region. A
+            home-hoard is permanently reserved for its home kingdom: only that
+            kingdom may capture it, and once owned it can never be seized
+            (other kingdoms' captures are rejected with `home_hoard_protected`).
 
     Node:
       allOf:

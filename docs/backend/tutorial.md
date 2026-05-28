@@ -733,7 +733,7 @@ curl -X POST http://localhost:3000/v1/worlds/01HW.../join \
 - 500 of each resource (`gold`, `wood`, `stone`, `iron`).
 - 20 Levy in your home Garrison army.
 
-**Your home-hoard is not yours yet.** Every spawn region carries a Standard-tier wilderness node flagged `is_home_hoard: true`. It is not owned by your kingdom at T0 — its garrison (`25 Levy, 10 Archer, 5 Pikeman`, per [§16.5](dun%20Game%20Design%20Document.v3.md)) must be defeated like any other wilderness node before it starts producing for you. Until then, `GET /v1/worlds/:id/map` will show your spawn region with `owner_kingdom_id: null`. Capturing it goes through the same `march:capture` flow as any other wilderness node — see [§3.10](#310-capture-nodes-and-claim-ruins).
+**Your home-hoard is not yours yet.** Every spawn region carries a Standard-tier wilderness node flagged `is_home_hoard: true`. It is not owned by your kingdom at T0 — its garrison (`25 Levy, 10 Archer, 5 Pikeman`, per [§16.5](dun%20Game%20Design%20Document.v3.md)) must be defeated before it starts producing for you. Until then, `GET /v1/worlds/:id/map` will show your spawn region with `owner_kingdom_id: null`. Capturing it goes through the same `march:capture` flow as any other node — but the node is **reserved for you**: no rival can race you to it, and once you own it no rival can take it (see [§3.11](#311-home-hoard-nodes)).
 
 **Proposed vs grace differs in spawn assignment.**
 
@@ -1112,10 +1112,10 @@ curl -X POST http://localhost:3000/v1/armies/01HN.../march \
 
 **The six intents:**
 
-- `attack` — fight whoever's there ([§3.12](#312-attack-and-raid)).
+- `attack` — raid a rival kingdom: battle whoever defends the target region and loot their stockpile. You cannot raid your own home region (`422 self_attack`). See [§3.12](#312-attack-and-raid).
 - `reinforce` — join your own forces at the target (or a friendly's, if reinforcing a same-kingdom army).
 - `scout` — gather intel without engaging.
-- `capture` — take a wilderness node ([§3.10](#310-capture-nodes-and-claim-ruins)).
+- `capture` — take a node, whether wilderness (fight its NPC garrison) or enemy-owned (fight the owner's defenders, or walk in). One verb covers both. See [§3.10](#310-capture-nodes-and-claim-ruins).
 - `claim_ruin` — pick up a ruin's resource cache ([§3.10](#310-capture-nodes-and-claim-ruins)).
 - `caravan` — deliver trade payload ([§3.13](#313-trade-with-caravans)). Dispatched via the caravan endpoint, not directly.
 
@@ -1132,9 +1132,9 @@ See [openapi.yaml](openapi.yaml) — `showArmy`, `splitArmy`, `renameArmy`, `mer
 
 ### 3.10 Capture nodes and claim ruins
 
-Capturing nodes is how you scale production beyond your home buildings. Wilderness nodes have static NPC garrisons; defeat them and you own the node.
+Capturing nodes is how you scale production beyond your home buildings. The single `capture` intent handles both cases: a **wilderness** node is taken by defeating its static NPC garrison; an **enemy-owned** node is taken by defeating the owner's defending armies at the region (or walking in unopposed if none are parked there). Either way, on a win the node's `owner_kingdom_id` flips to you.
 
-**Capture a wilderness node.**
+**Capture a node.**
 
 ```bash
 curl -X POST http://localhost:3000/v1/armies/01HN.../march \
@@ -1143,7 +1143,12 @@ curl -X POST http://localhost:3000/v1/armies/01HN.../march \
   -d '{ "target_region_id": "01HR3...", "intent": "capture" }'
 ```
 
-The march resolves combat against the wilderness garrison on arrival. **Catapults are required for capture** — an army with no Catapults will defeat the garrison but cannot flip ownership. Catapults are trained at Siege Workshop ([§3.7](#37-your-first-steps--military)).
+**Catapults are required for capture.** This and the other preconditions are checked **at dispatch** — an impossible capture never sets out, and you get a `422` with one of these codes:
+
+- `catapult_required` — the army carries no Catapult (train them at the Siege Workshop, [§3.7](#37-your-first-steps--military)).
+- `no_capturable_node` — the target region has no node.
+- `self_capture` — you already own the target node.
+- `home_hoard_protected` — the target is another kingdom's home-hoard, which can never be taken ([§3.11](#311-home-hoard-nodes)).
 
 Once captured, the node's `owner_kingdom_id` is set to yours, its garrison empties, and it starts contributing to your stockpile at its `base_rate`.
 
@@ -1183,17 +1188,17 @@ A **home-hoard** is the resource node placed in every kingdom's spawn region at 
 - There is **no exemption** for your own home-hoard: you must build a Siege Workshop, train a Catapult, and clear the garrison just like any other wilderness node. There's no `march:settle` or "automatic claim" verb.
 - Once captured the garrison is cleared and does not respawn (per §16.5 — "one-time speedbump per node"). The node contributes its `base_rate` to your stockpile from that moment.
 
-**Can they be attacked?** **Yes — once owned, a home-hoard behaves like any captured node** (per §16.5 open follow-up: "behaves like any other captured node"):
+**Can an enemy take it?** **No — a home-hoard is permanently reserved for its home kingdom.** Only the kingdom whose spawn region holds the node may capture it; any other kingdom's `march:capture` against it is rejected at dispatch with `422 home_hoard_protected`. This holds in every state:
 
-- An enemy can target your home-hoard region with `march:attack` (PvP — see [§3.12](#312-attack-and-raid)) or `march:capture` to flip ownership.
-- The capture flow is `Nodes::Attack`: if you have defenders parked at the region, a PvP battle resolves (with the standard combat rules, including walls if you happen to have built them there); if undefended, the attacker walks in and takes ownership with no Battle row.
-- **No respawn garrison.** Once the original wilderness garrison is defeated (by you, the original spawner, or whoever captured it first), it does not return. A home-hoard captured by an enemy then re-captured by you is an undefended walk-in unless someone parks units to defend.
-- The `is_home_hoard: true` flag travels with the node — even if your spawn has been taken by a rival, the map still identifies it as the spawn anchor; only `owner_kingdom_id` changes.
+- **While still wilderness at T0** — the reserved garrison can only be cleared by its own home kingdom. A rival cannot "race" you to your spawn anchor.
+- **After you own it** — it cannot be flipped. A rival's `march:capture` is rejected the same way.
+- **Your home base survives the round** (GDD §7). What a rival *can* still do is `march:attack` your home region to **raid your stockpile** (steal up to 25%, see [§3.12](#312-attack-and-raid)) — that targets your kingdom's resources, never the node's ownership.
+- The `is_home_hoard: true` flag is permanent and the node never changes hands, so it stays bound to the same kingdom for the entire round.
 
 **Map and region ownership**:
 
-- The `owner_kingdom_id` / `owner_handle` fields on a region are derived from the home-hoard node sitting in that region. When the home-hoard is unowned, the region reads as unowned; when it's owned, the region inherits the owner. There is no separate "region owner" record.
-- This is why `GET /v1/worlds/:id/map` may show your spawn as unclaimed early in the round, then show you as owner once you've captured the home-hoard, then potentially show an enemy as owner if they take it from you.
+- The `owner_kingdom_id` / `owner_handle` fields on a region are derived from the home-hoard node sitting in that region. When the home-hoard is unowned, the region reads as unowned; once its home kingdom captures it, the region shows that kingdom. There is no separate "region owner" record.
+- This is why `GET /v1/worlds/:id/map` shows your spawn as unclaimed early in the round, then shows you as owner once you've captured the home-hoard. Because home-hoards can't be seized, a spawn region only ever reads as unclaimed or owned-by-its-spawner — never flipped to a rival.
 
 **Other characteristics**:
 

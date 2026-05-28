@@ -179,7 +179,7 @@ See [08-nodes-and-ruins.md](08-nodes-and-ruins.md).
 | Intent | Service chain | Notes |
 |---|---|---|
 | `capture` (wilderness) | `Marches::Arrive` → `Nodes::Capture` → `Combat::ResolveGarrison` | requires Catapult; transfers ownership on victory |
-| `capture` (owned) | `Marches::Arrive` → `Nodes::Attack` → `Combat::Resolve` (or walk-in) | PvP at the node region, undefended ⇒ instant take |
+| `capture` (owned) | `Marches::Arrive` → `Nodes::Capture` → `Combat::Resolve` (or walk-in) | same service; PvP at the node region, undefended ⇒ instant take |
 | `claim_ruin` | `Marches::Arrive` → `Ruins::Claim` → `Combat::ResolveGarrison` | warehouse-capped cache grant; `dun.ruin.claimed` event |
 
 ---
@@ -248,7 +248,7 @@ See [11-round-end-and-archive.md](11-round-end-and-archive.md). The three new en
 | Wonder completes (Consecration survives) | `Wonders::Complete` → `Rounds::End` → archive snapshot + stats + title + leaderboards | round freeze |
 | Wonder destroyed by damage | `Wonders::Destroy` → `Wreckers::Attribute` | credits killing-blow player with `wonders_destroyed` |
 | Player-vs-player battle resolved | `Combat::ApplyOutcome` → `Profiles::Increment` | raid stats (launched/defended/won, resources_looted) |
-| Node ownership changes | `Nodes::Capture`/`Nodes::Attack` → `Kingdoms::BumpPeakNodes` | per-round peak rolls up at `Rounds::End` |
+| Node ownership changes | `Nodes::Capture` → `Kingdoms::BumpPeakNodes` | per-round peak rolls up at `Rounds::End` |
 
 ---
 

@@ -295,8 +295,8 @@ Selected from the most popular board game themes (BoardGameGeek research). Chose
 - Resource nodes (e.g. Ancient Forest, Iron Vein, Marble Quarry, Gold Hoard) scattered across the map  
 - Each node provides bonus income to its owner  
 - Nodes can be captured by dispatching armies (requires Catapults)  
-- Nodes can be contested: another player can attack and seize them  
-- Kingdom stockpiles can be raided (steal a percentage)  
+- Nodes can be contested: another player can attack and seize them — **except a kingdom's Home Hoard node, which is permanently reserved for its home kingdom and can never be seized** (§16.5)  
+- Kingdom stockpiles can be raided (steal a percentage) — this includes raiding a rival's home region, which loots resources but never takes the Home Hoard node  
 - Kingdoms cannot be permanently conquered (home base survives the round)
 
 ### Reasoning
@@ -1133,6 +1133,7 @@ Each round per side:
 4. Variance: uniform(0.92, 1.08)  
 5. Damage distributed proportionally across opponent units, weighted by unit count and inverse-HP (chaff dies first)  
 6. Defender bonus: defender's Def multiplied by 1.20 in home region, 1.10 in owned non-home region, 1.0 in neutral/enemy region
+   - "Home region" is keyed off the kingdom's permanent spawn assignment (`home_region_id`), **not** off who owns the region's Home Hoard node. A kingdom therefore gets its 1.20 home bonus from T0 — even before it has captured its own (still-wilderness) Home Hoard — and never loses it, since the Home Hoard can never be seized (§16.5). The walls bonus is gated the same way.
 
 Battle ends early if one side's total HP drops below 15% of starting HP (rout). Routed side loses additional 30% of remaining units fleeing.
 
@@ -1423,7 +1424,7 @@ Garrisons are static, do not respawn after defeat, do not pursue. One-time speed
 - Whether seed is exposed at round start or only after round end (current: visible from start)  
 - Whether the planar graph generator should bias toward choke-point structures (peninsulas, narrow corridors) or stay uniform  
 - Whether Rich node placement should cluster (creating contested zones) or spread (creating multiple flashpoints), current default: spread  
-- Whether Home Hoard nodes can be lost permanently or reset to neutral if the kingdom is heavily raided (current: behaves like any other captured node)  
+- ~~Whether Home Hoard nodes can be lost permanently or reset to neutral if the kingdom is heavily raided~~ **Resolved**: a Home Hoard is permanently reserved for its home kingdom. Only that kingdom may capture it (in any state); every other kingdom's capture attempt is rejected (`home_hoard_protected`). It can never be seized — the kingdom's home base survives the round (§7). Rivals can still raid the home region's stockpile via `attack`, but never take the node.  
 - Garrison scaling if playtest shows Rich nodes are too easy to take with a Knight rush  
 - Whether to expose map generation parameters as world creation options (configurable density, size override) or keep formula fixed for v1
 

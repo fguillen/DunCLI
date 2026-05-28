@@ -2625,6 +2625,12 @@ type ErrorEnvelopeError struct {
 	// - `cross_world` — origin and destination are in different worlds
 	// - `world_not_active` — the world is not in its active phase
 	// - `march_already_resolved` — the march has already arrived; cannot be recalled
+	// - `catapult_required` — a `capture` march needs at least one Catapult in the army
+	// - `no_capturable_node` — a `capture` march targets a region with no node
+	// - `self_capture` — a `capture` march targets a node the kingdom already owns
+	// - `home_hoard_protected` — a `capture` march targets another kingdom's home-hoard, which can
+	// never be seized
+	// - `self_attack` — an `attack` (raid) march targets the kingdom's own home region
 	// **Trade & caravans**
 	// - `invalid_payload` — the caravan payload is not valid
 	// - `insufficient_capacity` — the escort cannot carry the payload
@@ -5294,9 +5300,12 @@ func (o NilString) Or(d string) string {
 // Merged schema.
 // Ref: #/components/schemas/Node
 type Node struct {
-	ID             string       `json:"id"`
-	Resource       NodeResource `json:"resource"`
-	Tier           NodeTier     `json:"tier"`
+	ID       string       `json:"id"`
+	Resource NodeResource `json:"resource"`
+	Tier     NodeTier     `json:"tier"`
+	// True for the resource node placed in a kingdom's spawn region. A home-hoard is permanently
+	// reserved for its home kingdom: only that kingdom may capture it, and once owned it can never be
+	// seized (other kingdoms' captures are rejected with `home_hoard_protected`).
 	IsHomeHoard    bool         `json:"is_home_hoard"`
 	BaseRate       OptInt       `json:"base_rate"`
 	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
@@ -5477,10 +5486,13 @@ func (s *NodeResource) UnmarshalText(data []byte) error {
 
 // Ref: #/components/schemas/NodeSummary
 type NodeSummary struct {
-	ID          string              `json:"id"`
-	Resource    NodeSummaryResource `json:"resource"`
-	Tier        NodeSummaryTier     `json:"tier"`
-	IsHomeHoard bool                `json:"is_home_hoard"`
+	ID       string              `json:"id"`
+	Resource NodeSummaryResource `json:"resource"`
+	Tier     NodeSummaryTier     `json:"tier"`
+	// True for the resource node placed in a kingdom's spawn region. A home-hoard is permanently
+	// reserved for its home kingdom: only that kingdom may capture it, and once owned it can never be
+	// seized (other kingdoms' captures are rejected with `home_hoard_protected`).
+	IsHomeHoard bool `json:"is_home_hoard"`
 }
 
 // GetID returns the value of ID.
