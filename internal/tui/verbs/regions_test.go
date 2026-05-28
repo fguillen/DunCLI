@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fguillen/dun-cli/internal/api/gen"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,7 +90,7 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 				"nodes": []map[string]any{
 					{
 						"id": "nd-1", "resource": "gold", "tier": "standard",
-						"is_home_hoard": true, "owner_kingdom_id": "kgd-7",
+						"is_home_hoard": true, "owner_kingdom_id": "kgd-7", "owner_handle": "IronFist",
 						"region_id": "reg-1", "region_name": "Greyhollow",
 						"base_rate": 10, "garrison": map[string]int{},
 					},
@@ -98,6 +99,12 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 						"is_home_hoard": false, "owner_kingdom_id": nil,
 						"region_id": "reg-2", "region_name": "Ironvale",
 						"base_rate": 25, "garrison": map[string]int{"pikeman": 8},
+					},
+					{
+						"id": "nd-3", "resource": "stone", "tier": "standard",
+						"is_home_hoard": true, "owner_kingdom_id": nil,
+						"region_id": "reg-3", "region_name": "Mossgrove",
+						"base_rate": 10, "garrison": map[string]int{"levy": 25, "archer": 10, "pikeman": 5},
 					},
 				},
 			})
@@ -160,8 +167,10 @@ func TestRunNodesList_unfiltered(t *testing.T) {
 	require.Contains(t, got, "Nodes:")
 	require.Contains(t, got, "Greyhollow")
 	require.Contains(t, got, "Ironvale")
-	require.Contains(t, got, "home-hoard")
-	require.Contains(t, got, "wild")
+	require.Contains(t, got, "Mossgrove")
+	require.Contains(t, got, "owner=IronFist (home-hoard)", "a held home hoard must name its holder, not just the tag")
+	require.Contains(t, got, "owner=unclaimed (home-hoard)", "an unclaimed home hoard must read as unclaimed")
+	require.Contains(t, got, "owner=wild", "a wilderness node must read as wild")
 }
 
 func TestRunNodesList_wildOnly(t *testing.T) {
@@ -202,4 +211,49 @@ func TestRunNodeShow_byRegionName(t *testing.T) {
 	got := out.String()
 	require.Contains(t, got, "Node nd-1")
 	require.Contains(t, got, "region:    Greyhollow")
+}
+
+func TestNodeOwnerLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		node gen.Node
+		wild string
+		want string
+	}{
+		{
+			name: "held home hoard names its holder and keeps the tag",
+			node: gen.Node{IsHomeHoard: true, OwnerHandle: gen.NewOptNilString("IronFist")},
+			wild: "wild",
+			want: "IronFist (home-hoard)",
+		},
+		{
+			name: "held home hoard falls back to the kingdom id when no handle",
+			node: gen.Node{IsHomeHoard: true, OwnerKingdomID: gen.NewOptNilString("kgd-7")},
+			wild: "wild",
+			want: "kgd-7 (home-hoard)",
+		},
+		{
+			name: "unclaimed home hoard reads as unclaimed",
+			node: gen.Node{IsHomeHoard: true},
+			wild: "wild",
+			want: "unclaimed (home-hoard)",
+		},
+		{
+			name: "owned ordinary node shows the handle alone",
+			node: gen.Node{OwnerHandle: gen.NewOptNilString("Ragnar")},
+			wild: "wild",
+			want: "Ragnar",
+		},
+		{
+			name: "wilderness node uses the caller's wild label",
+			node: gen.Node{},
+			wild: "(wild)",
+			want: "(wild)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, nodeOwnerLabel(tt.node, tt.wild))
+		})
+	}
 }

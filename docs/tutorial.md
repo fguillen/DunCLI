@@ -620,7 +620,7 @@ Greyhollow  (T forest)
   position:  x=0.10 y=0.20
   owner:     IronFist
   nodes:
-    Greyhollow        gold    standard  owner=home-hoard
+    Greyhollow        gold    standard  owner=IronFist (home-hoard)
   adjacent:  Ironvale
 ```
 
@@ -642,14 +642,16 @@ Columns: region name, tier, claim state, garrison composition.
 ```
 dun> nodes
 Nodes:
-  Greyhollow        gold    standard  owner=home-hoard
+  Greyhollow        gold    standard  owner=IronFist (home-hoard)
   Ironvale          iron    rich      owner=wild  garrison=pikeman=8
+  Mossgrove         stone   standard  owner=unclaimed (home-hoard)  garrison=archer=10, levy=25, pikeman=5
 ```
 
 `--owner` filters client-side:
 
 - `mine` — your kingdom owns it (and it's not a home-hoard).
-- `home-hoard` — your one immovable starter node.
+- `home-hoard` — home-hoard nodes. The owner column names the holding
+  kingdom, or reads `unclaimed`; your own is your immovable starter node.
 - `wild` — no owner.
 - `captured` — owned, but not by you.
 
@@ -662,7 +664,7 @@ the node's ULID directly.
 dun> node show Greyhollow
 Node nd-1  (gold, standard)
   region:    Greyhollow
-  owner:     (home-hoard)
+  owner:     IronFist (home-hoard)
   base rate: 10/hr
 ```
 

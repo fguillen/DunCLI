@@ -147,6 +147,27 @@ func nodeOwner(n gen.Node, wild string) string {
 	return wild
 }
 
+// nodeOwnerLabel renders a node's owner for display, keeping the
+// home-hoard tag *and* the real holder visible. Collapsing every
+// home-hoard node to a bare "home-hoard" (the previous behaviour) hid
+// whether it was your own starter node, another kingdom's, or still
+// unclaimed — the exact distinction a player needs to find their home
+// node. wild is the label for a plain wilderness node; callers pass
+// "wild" or "(wild)" to match their surrounding style.
+func nodeOwnerLabel(n gen.Node, wild string) string {
+	owner := nodeOwner(n, "")
+	if n.IsHomeHoard {
+		if owner == "" {
+			return "unclaimed (home-hoard)"
+		}
+		return owner + " (home-hoard)"
+	}
+	if owner == "" {
+		return wild
+	}
+	return owner
+}
+
 // runMap implements `map` — prints one styled line per region. The
 // adjacency list is rendered by name (resolved via the same map
 // response, since RegionSummary.adjacency is a []string of region
@@ -405,10 +426,6 @@ func formatComposition(m map[string]int) string {
 }
 
 func formatNodeRow(n gen.Node) string {
-	owner := nodeOwner(n, "wild")
-	if n.IsHomeHoard {
-		owner = "home-hoard"
-	}
 	region := "(unknown region)"
 	if v, ok := n.RegionName.Get(); ok {
 		region = v
@@ -418,7 +435,7 @@ func formatNodeRow(n gen.Node) string {
 		garrison = "  garrison=" + formatComposition(map[string]int(g))
 	}
 	return fmt.Sprintf("%-16s  %-6s  %-8s  owner=%s%s",
-		region, string(n.Resource), string(n.Tier), owner, garrison)
+		region, string(n.Resource), string(n.Tier), nodeOwnerLabel(n, "wild"), garrison)
 }
 
 // printRegion renders region detail + an `Adjacent:` line from the
@@ -468,11 +485,7 @@ func printNode(sess *shell.Session, n *gen.Node) {
 	if v, ok := n.RegionName.Get(); ok {
 		_, _ = fmt.Fprintln(sess.Out, "  region:    "+v)
 	}
-	owner := nodeOwner(*n, "(wild)")
-	if n.IsHomeHoard {
-		owner = "(home-hoard)"
-	}
-	_, _ = fmt.Fprintln(sess.Out, "  owner:     "+owner)
+	_, _ = fmt.Fprintln(sess.Out, "  owner:     "+nodeOwnerLabel(*n, "(wild)"))
 	if br, ok := n.BaseRate.Get(); ok {
 		_, _ = fmt.Fprintf(sess.Out, "  base rate: %d/hr\n", br)
 	}
