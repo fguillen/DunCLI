@@ -52,6 +52,7 @@ const (
 	MergeArmyOperation               OperationName = "MergeArmy"
 	PayWonderMilestoneOperation      OperationName = "PayWonderMilestone"
 	PreviewBuildUpgradeOperation     OperationName = "PreviewBuildUpgrade"
+	PreviewKingdomMarchesOperation   OperationName = "PreviewKingdomMarches"
 	PreviewTrainingOrderOperation    OperationName = "PreviewTrainingOrder"
 	ProposeWorldOperation            OperationName = "ProposeWorld"
 	QueueBuildOrderOperation         OperationName = "QueueBuildOrder"

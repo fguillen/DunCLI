@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.4.1"
+  version: "1.5.0"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -1279,6 +1279,43 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /kingdoms/{id}/march/preview:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      operationId: previewKingdomMarches
+      tags: [Player kingdoms]
+      summary: Preview march ETA for every owned army to every region
+      description: |
+        Read-only bulk travel estimate so the client can show "how long would
+        this army take to reach region X?" before committing a march. Returns one
+        entry per army the kingdom owns and, within it, one entry per region on
+        the world.
+
+        ETAs are computed with the exact path/speed/terrain math used by
+        `POST /kingdoms/{kingdom_id}/.../march` (shortest path on the region
+        adjacency graph; per-leg time from the slowest unit's speed × the average
+        terrain modifier of the leg's two endpoints; Knight/Scout-only armies
+        ignore terrain — §16.10, §16.3), so a preview equals the actual dispatch.
+        Nothing is scheduled and no march order is created.
+
+        `arrives_at` is `now + duration_seconds` on the server clock. The army's
+        current region reports `hops: 0`, `duration_seconds: 0`. `reachable: false`
+        (no path, or an empty army) omits `hops`/`duration_seconds`/`arrives_at`.
+        A kingdom with no armies returns `army_previews: []`. Armies are previewed
+        regardless of status — it does not check home-status or feasibility, which
+        remain enforced at dispatch. `Marches::ResolveArrivals` runs first so
+        arrived armies report their up-to-date location.
+      security: [{ playerBearer: [] }]
+      responses:
+        "200":
+          description: March preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarchPreviewList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /kingdoms/{id}/train/catalog:
     parameters:
@@ -2860,9 +2897,39 @@ components:
         claimed_by_kingdom_id: { type: string, nullable: true }
         claimed_at: { type: string, nullable: true, format: date-time }
 
+    VisibleArmy:
+      type: object
+      description: >-
+        An army present in a region, as shown on the world map. v1 is full
+        visibility (§16.9): every army is listed with full composition. The schema
+        is forward-compatible with v1.1 fog of war — non-visible armies will simply
+        be dropped from the array, and `composition` (optional, nullable) may be
+        bucketed or hidden, neither of which is a breaking change.
+      required: [army_id, kingdom_id, owner_handle, name, mine, status]
+      properties:
+        army_id: { type: string }
+        kingdom_id: { type: string }
+        owner_handle:
+          type: string
+          description: Handle of the owning kingdom's player.
+        name: { type: string }
+        mine:
+          type: boolean
+          description: True when the army belongs to one of the caller's own kingdoms.
+        status:
+          type: string
+          enum: [home, marching, engaged, returning]
+        composition:
+          nullable: true
+          description: >-
+            Full unit counts under v1. Optional/nullable so v1.1 fog can bucket or
+            hide it without a breaking change.
+          allOf:
+            - { $ref: "#/components/schemas/Composition" }
+
     RegionSummary:
       type: object
-      required: [id, name, terrain, position, adjacency, nodes]
+      required: [id, name, terrain, position, adjacency, nodes, visible_armies]
       properties:
         id: { type: string }
         name: { type: string }
@@ -2890,6 +2957,10 @@ components:
           nullable: true
           allOf:
             - { $ref: "#/components/schemas/RuinSummary" }
+        visible_armies:
+          type: array
+          description: Armies present in this region (§16.9 visibility model).
+          items: { $ref: "#/components/schemas/VisibleArmy" }
 
     Region:
       type: object
@@ -3215,6 +3286,48 @@ components:
       type: object
       description: Map of unit kind to non-negative integer count.
       additionalProperties: { type: integer, minimum: 0 }
+
+    MarchPreviewList:
+      type: object
+      required: [army_previews]
+      properties:
+        army_previews:
+          type: array
+          items: { $ref: "#/components/schemas/ArmyMarchPreview" }
+
+    ArmyMarchPreview:
+      type: object
+      required: [army_id, army_name, regions]
+      properties:
+        army_id: { type: string }
+        army_name: { type: string }
+        regions:
+          type: array
+          description: One entry per region on the world.
+          items: { $ref: "#/components/schemas/RegionMarchPreview" }
+
+    RegionMarchPreview:
+      type: object
+      required: [region_id, reachable]
+      properties:
+        region_id: { type: string }
+        reachable:
+          type: boolean
+          description: >-
+            False when no path exists from the army's current region or the army
+            has no units. When false, `hops`/`duration_seconds`/`arrives_at` are omitted.
+        hops:
+          type: integer
+          minimum: 0
+          description: Number of legs on the shortest path. 0 for the army's current region.
+        duration_seconds:
+          type: integer
+          minimum: 0
+          description: Total travel time, matching what an actual dispatch would set.
+        arrives_at:
+          type: string
+          format: date-time
+          description: Server clock `now + duration_seconds`.
 
     Army:
       type: object

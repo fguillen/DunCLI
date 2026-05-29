@@ -412,6 +412,28 @@ type Invoker interface {
 	//
 	// GET /kingdoms/{id}/build/preview
 	PreviewBuildUpgrade(ctx context.Context, params PreviewBuildUpgradeParams) (PreviewBuildUpgradeRes, error)
+	// PreviewKingdomMarches invokes previewKingdomMarches operation.
+	//
+	// Read-only bulk travel estimate so the client can show "how long would
+	// this army take to reach region X?" before committing a march. Returns one
+	// entry per army the kingdom owns and, within it, one entry per region on
+	// the world.
+	// ETAs are computed with the exact path/speed/terrain math used by
+	// `POST /kingdoms/{kingdom_id}/.../march` (shortest path on the region
+	// adjacency graph; per-leg time from the slowest unit's speed × the average
+	// terrain modifier of the leg's two endpoints; Knight/Scout-only armies
+	// ignore terrain — §16.10, §16.3), so a preview equals the actual dispatch.
+	// Nothing is scheduled and no march order is created.
+	// `arrives_at` is `now + duration_seconds` on the server clock. The army's
+	// current region reports `hops: 0`, `duration_seconds: 0`. `reachable: false`
+	// (no path, or an empty army) omits `hops`/`duration_seconds`/`arrives_at`.
+	// A kingdom with no armies returns `army_previews: []`. Armies are previewed
+	// regardless of status — it does not check home-status or feasibility, which
+	// remain enforced at dispatch. `Marches::ResolveArrivals` runs first so
+	// arrived armies report their up-to-date location.
+	//
+	// GET /kingdoms/{id}/march/preview
+	PreviewKingdomMarches(ctx context.Context, params PreviewKingdomMarchesParams) (PreviewKingdomMarchesRes, error)
 	// PreviewTrainingOrder invokes previewTrainingOrder operation.
 	//
 	// Returns per-unit and total cost, per-unit and total time, affordability,
@@ -6656,6 +6678,148 @@ func (c *Client) sendPreviewBuildUpgrade(ctx context.Context, params PreviewBuil
 
 	stage = "DecodeResponse"
 	result, err := decodePreviewBuildUpgradeResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// PreviewKingdomMarches invokes previewKingdomMarches operation.
+//
+// Read-only bulk travel estimate so the client can show "how long would
+// this army take to reach region X?" before committing a march. Returns one
+// entry per army the kingdom owns and, within it, one entry per region on
+// the world.
+// ETAs are computed with the exact path/speed/terrain math used by
+// `POST /kingdoms/{kingdom_id}/.../march` (shortest path on the region
+// adjacency graph; per-leg time from the slowest unit's speed × the average
+// terrain modifier of the leg's two endpoints; Knight/Scout-only armies
+// ignore terrain — §16.10, §16.3), so a preview equals the actual dispatch.
+// Nothing is scheduled and no march order is created.
+// `arrives_at` is `now + duration_seconds` on the server clock. The army's
+// current region reports `hops: 0`, `duration_seconds: 0`. `reachable: false`
+// (no path, or an empty army) omits `hops`/`duration_seconds`/`arrives_at`.
+// A kingdom with no armies returns `army_previews: []`. Armies are previewed
+// regardless of status — it does not check home-status or feasibility, which
+// remain enforced at dispatch. `Marches::ResolveArrivals` runs first so
+// arrived armies report their up-to-date location.
+//
+// GET /kingdoms/{id}/march/preview
+func (c *Client) PreviewKingdomMarches(ctx context.Context, params PreviewKingdomMarchesParams) (PreviewKingdomMarchesRes, error) {
+	res, err := c.sendPreviewKingdomMarches(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendPreviewKingdomMarches(ctx context.Context, params PreviewKingdomMarchesParams) (res PreviewKingdomMarchesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("previewKingdomMarches"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/kingdoms/{id}/march/preview"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, PreviewKingdomMarchesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/kingdoms/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/march/preview"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:PlayerBearer"
+			switch err := c.securityPlayerBearer(ctx, PreviewKingdomMarchesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"PlayerBearer\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodePreviewKingdomMarchesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

@@ -181,6 +181,10 @@ type PreviewBuildUpgradeRes interface {
 	previewBuildUpgradeRes()
 }
 
+type PreviewKingdomMarchesRes interface {
+	previewKingdomMarchesRes()
+}
+
 type PreviewTrainingOrderRes interface {
 	previewTrainingOrderRes()
 }

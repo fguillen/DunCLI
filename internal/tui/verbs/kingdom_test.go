@@ -97,7 +97,7 @@ func TestRunKingdomShow_rendersDashboard(t *testing.T) {
 		},
 		"/v1/worlds/wld-1/map": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"regions":[
-				{"id":"reg-1","name":"Greyhollow","terrain":"forest","position":{"x":0.1,"y":0.2},"adjacency":[],"nodes":[]}
+				{"id":"reg-1","name":"Greyhollow","terrain":"forest","position":{"x":0.1,"y":0.2},"adjacency":[],"nodes":[],"visible_armies":[]}
 			]}`))
 		},
 	}

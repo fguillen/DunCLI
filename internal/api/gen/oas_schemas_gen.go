@@ -698,6 +698,44 @@ func (s *ArmyActiveMarchIntent) UnmarshalText(data []byte) error {
 	}
 }
 
+// Ref: #/components/schemas/ArmyMarchPreview
+type ArmyMarchPreview struct {
+	ArmyID   string `json:"army_id"`
+	ArmyName string `json:"army_name"`
+	// One entry per region on the world.
+	Regions []RegionMarchPreview `json:"regions"`
+}
+
+// GetArmyID returns the value of ArmyID.
+func (s *ArmyMarchPreview) GetArmyID() string {
+	return s.ArmyID
+}
+
+// GetArmyName returns the value of ArmyName.
+func (s *ArmyMarchPreview) GetArmyName() string {
+	return s.ArmyName
+}
+
+// GetRegions returns the value of Regions.
+func (s *ArmyMarchPreview) GetRegions() []RegionMarchPreview {
+	return s.Regions
+}
+
+// SetArmyID sets the value of ArmyID.
+func (s *ArmyMarchPreview) SetArmyID(val string) {
+	s.ArmyID = val
+}
+
+// SetArmyName sets the value of ArmyName.
+func (s *ArmyMarchPreview) SetArmyName(val string) {
+	s.ArmyName = val
+}
+
+// SetRegions sets the value of Regions.
+func (s *ArmyMarchPreview) SetRegions(val []RegionMarchPreview) {
+	s.Regions = val
+}
+
 type ArmyStatus string
 
 const (
@@ -5113,6 +5151,23 @@ func (s *MarchOrderIntent) UnmarshalText(data []byte) error {
 	}
 }
 
+// Ref: #/components/schemas/MarchPreviewList
+type MarchPreviewList struct {
+	ArmyPreviews []ArmyMarchPreview `json:"army_previews"`
+}
+
+// GetArmyPreviews returns the value of ArmyPreviews.
+func (s *MarchPreviewList) GetArmyPreviews() []ArmyMarchPreview {
+	return s.ArmyPreviews
+}
+
+// SetArmyPreviews sets the value of ArmyPreviews.
+func (s *MarchPreviewList) SetArmyPreviews(val []ArmyMarchPreview) {
+	s.ArmyPreviews = val
+}
+
+func (*MarchPreviewList) previewKingdomMarchesRes() {}
+
 // Ref: #/components/schemas/Member
 type Member struct {
 	MembershipID string       `json:"membership_id"`
@@ -6320,6 +6375,69 @@ func (o OptNilArmyActiveMarch) Or(d ArmyActiveMarch) ArmyActiveMarch {
 	return d
 }
 
+// NewOptNilComposition returns new OptNilComposition with value set to v.
+func NewOptNilComposition(v Composition) OptNilComposition {
+	return OptNilComposition{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilComposition is optional nullable Composition.
+type OptNilComposition struct {
+	Value Composition
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilComposition was set.
+func (o OptNilComposition) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilComposition) Reset() {
+	var v Composition
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilComposition) SetTo(v Composition) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilComposition) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilComposition) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v Composition
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilComposition) Get() (v Composition, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilComposition) Or(d Composition) Composition {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilDateTime returns new OptNilDateTime with value set to v.
 func NewOptNilDateTime(v time.Time) OptNilDateTime {
 	return OptNilDateTime{
@@ -7471,6 +7589,14 @@ type PreviewBuildUpgradeUnprocessableEntity ErrorEnvelope
 
 func (*PreviewBuildUpgradeUnprocessableEntity) previewBuildUpgradeRes() {}
 
+type PreviewKingdomMarchesNotFound ErrorEnvelope
+
+func (*PreviewKingdomMarchesNotFound) previewKingdomMarchesRes() {}
+
+type PreviewKingdomMarchesUnauthorized ErrorEnvelope
+
+func (*PreviewKingdomMarchesUnauthorized) previewKingdomMarchesRes() {}
+
 type PreviewTrainingOrderBuilding string
 
 const (
@@ -8038,6 +8164,70 @@ func (s *Region) SetOwnerHandle(val OptNilString) {
 
 func (*Region) showRegionRes() {}
 
+// Ref: #/components/schemas/RegionMarchPreview
+type RegionMarchPreview struct {
+	RegionID string `json:"region_id"`
+	// False when no path exists from the army's current region or the army has no units. When false,
+	// `hops`/`duration_seconds`/`arrives_at` are omitted.
+	Reachable bool `json:"reachable"`
+	// Number of legs on the shortest path. 0 for the army's current region.
+	Hops OptInt `json:"hops"`
+	// Total travel time, matching what an actual dispatch would set.
+	DurationSeconds OptInt `json:"duration_seconds"`
+	// Server clock `now + duration_seconds`.
+	ArrivesAt OptDateTime `json:"arrives_at"`
+}
+
+// GetRegionID returns the value of RegionID.
+func (s *RegionMarchPreview) GetRegionID() string {
+	return s.RegionID
+}
+
+// GetReachable returns the value of Reachable.
+func (s *RegionMarchPreview) GetReachable() bool {
+	return s.Reachable
+}
+
+// GetHops returns the value of Hops.
+func (s *RegionMarchPreview) GetHops() OptInt {
+	return s.Hops
+}
+
+// GetDurationSeconds returns the value of DurationSeconds.
+func (s *RegionMarchPreview) GetDurationSeconds() OptInt {
+	return s.DurationSeconds
+}
+
+// GetArrivesAt returns the value of ArrivesAt.
+func (s *RegionMarchPreview) GetArrivesAt() OptDateTime {
+	return s.ArrivesAt
+}
+
+// SetRegionID sets the value of RegionID.
+func (s *RegionMarchPreview) SetRegionID(val string) {
+	s.RegionID = val
+}
+
+// SetReachable sets the value of Reachable.
+func (s *RegionMarchPreview) SetReachable(val bool) {
+	s.Reachable = val
+}
+
+// SetHops sets the value of Hops.
+func (s *RegionMarchPreview) SetHops(val OptInt) {
+	s.Hops = val
+}
+
+// SetDurationSeconds sets the value of DurationSeconds.
+func (s *RegionMarchPreview) SetDurationSeconds(val OptInt) {
+	s.DurationSeconds = val
+}
+
+// SetArrivesAt sets the value of ArrivesAt.
+func (s *RegionMarchPreview) SetArrivesAt(val OptDateTime) {
+	s.ArrivesAt = val
+}
+
 // Ref: #/components/schemas/RegionSummary
 type RegionSummary struct {
 	ID            string               `json:"id"`
@@ -8054,6 +8244,8 @@ type RegionSummary struct {
 	Adjacency   []string          `json:"adjacency"`
 	Nodes       []NodeSummary     `json:"nodes"`
 	Ruin        OptNilRuinSummary `json:"ruin"`
+	// Armies present in this region (§16.9 visibility model).
+	VisibleArmies []VisibleArmy `json:"visible_armies"`
 }
 
 // GetID returns the value of ID.
@@ -8116,6 +8308,11 @@ func (s *RegionSummary) GetRuin() OptNilRuinSummary {
 	return s.Ruin
 }
 
+// GetVisibleArmies returns the value of VisibleArmies.
+func (s *RegionSummary) GetVisibleArmies() []VisibleArmy {
+	return s.VisibleArmies
+}
+
 // SetID sets the value of ID.
 func (s *RegionSummary) SetID(val string) {
 	s.ID = val
@@ -8174,6 +8371,11 @@ func (s *RegionSummary) SetNodes(val []NodeSummary) {
 // SetRuin sets the value of Ruin.
 func (s *RegionSummary) SetRuin(val OptNilRuinSummary) {
 	s.Ruin = val
+}
+
+// SetVisibleArmies sets the value of VisibleArmies.
+func (s *RegionSummary) SetVisibleArmies(val []VisibleArmy) {
+	s.VisibleArmies = val
 }
 
 type RegionSummaryTerrain string
@@ -10282,6 +10484,150 @@ func (*UpdateServerUnauthorized) updateServerRes() {}
 type UpdateServerUnprocessableEntity ErrorEnvelope
 
 func (*UpdateServerUnprocessableEntity) updateServerRes() {}
+
+// An army present in a region, as shown on the world map. v1 is full visibility (§16.9): every army
+// is listed with full composition. The schema is forward-compatible with v1.1 fog of war —
+// non-visible armies will simply be dropped from the array, and `composition` (optional, nullable)
+// may be bucketed or hidden, neither of which is a breaking change.
+// Ref: #/components/schemas/VisibleArmy
+type VisibleArmy struct {
+	ArmyID    string `json:"army_id"`
+	KingdomID string `json:"kingdom_id"`
+	// Handle of the owning kingdom's player.
+	OwnerHandle string `json:"owner_handle"`
+	Name        string `json:"name"`
+	// True when the army belongs to one of the caller's own kingdoms.
+	Mine   bool              `json:"mine"`
+	Status VisibleArmyStatus `json:"status"`
+	// Full unit counts under v1. Optional/nullable so v1.1 fog can bucket or hide it without a breaking
+	// change.
+	Composition OptNilComposition `json:"composition"`
+}
+
+// GetArmyID returns the value of ArmyID.
+func (s *VisibleArmy) GetArmyID() string {
+	return s.ArmyID
+}
+
+// GetKingdomID returns the value of KingdomID.
+func (s *VisibleArmy) GetKingdomID() string {
+	return s.KingdomID
+}
+
+// GetOwnerHandle returns the value of OwnerHandle.
+func (s *VisibleArmy) GetOwnerHandle() string {
+	return s.OwnerHandle
+}
+
+// GetName returns the value of Name.
+func (s *VisibleArmy) GetName() string {
+	return s.Name
+}
+
+// GetMine returns the value of Mine.
+func (s *VisibleArmy) GetMine() bool {
+	return s.Mine
+}
+
+// GetStatus returns the value of Status.
+func (s *VisibleArmy) GetStatus() VisibleArmyStatus {
+	return s.Status
+}
+
+// GetComposition returns the value of Composition.
+func (s *VisibleArmy) GetComposition() OptNilComposition {
+	return s.Composition
+}
+
+// SetArmyID sets the value of ArmyID.
+func (s *VisibleArmy) SetArmyID(val string) {
+	s.ArmyID = val
+}
+
+// SetKingdomID sets the value of KingdomID.
+func (s *VisibleArmy) SetKingdomID(val string) {
+	s.KingdomID = val
+}
+
+// SetOwnerHandle sets the value of OwnerHandle.
+func (s *VisibleArmy) SetOwnerHandle(val string) {
+	s.OwnerHandle = val
+}
+
+// SetName sets the value of Name.
+func (s *VisibleArmy) SetName(val string) {
+	s.Name = val
+}
+
+// SetMine sets the value of Mine.
+func (s *VisibleArmy) SetMine(val bool) {
+	s.Mine = val
+}
+
+// SetStatus sets the value of Status.
+func (s *VisibleArmy) SetStatus(val VisibleArmyStatus) {
+	s.Status = val
+}
+
+// SetComposition sets the value of Composition.
+func (s *VisibleArmy) SetComposition(val OptNilComposition) {
+	s.Composition = val
+}
+
+type VisibleArmyStatus string
+
+const (
+	VisibleArmyStatusHome      VisibleArmyStatus = "home"
+	VisibleArmyStatusMarching  VisibleArmyStatus = "marching"
+	VisibleArmyStatusEngaged   VisibleArmyStatus = "engaged"
+	VisibleArmyStatusReturning VisibleArmyStatus = "returning"
+)
+
+// AllValues returns all VisibleArmyStatus values.
+func (VisibleArmyStatus) AllValues() []VisibleArmyStatus {
+	return []VisibleArmyStatus{
+		VisibleArmyStatusHome,
+		VisibleArmyStatusMarching,
+		VisibleArmyStatusEngaged,
+		VisibleArmyStatusReturning,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s VisibleArmyStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case VisibleArmyStatusHome:
+		return []byte(s), nil
+	case VisibleArmyStatusMarching:
+		return []byte(s), nil
+	case VisibleArmyStatusEngaged:
+		return []byte(s), nil
+	case VisibleArmyStatusReturning:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *VisibleArmyStatus) UnmarshalText(data []byte) error {
+	switch VisibleArmyStatus(data) {
+	case VisibleArmyStatusHome:
+		*s = VisibleArmyStatusHome
+		return nil
+	case VisibleArmyStatusMarching:
+		*s = VisibleArmyStatusMarching
+		return nil
+	case VisibleArmyStatusEngaged:
+		*s = VisibleArmyStatusEngaged
+		return nil
+	case VisibleArmyStatusReturning:
+		*s = VisibleArmyStatusReturning
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // Ref: #/components/schemas/Wonder
 type Wonder struct {

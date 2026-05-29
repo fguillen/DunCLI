@@ -44,20 +44,65 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 						"adjacency":        []string{"reg-2"},
 						"owner_kingdom_id": "kgd-7", "owner_handle": "IronFist",
 						"nodes": []map[string]any{{"id": "nd-1", "resource": "gold", "tier": "standard", "is_home_hoard": true}},
+						"visible_armies": []map[string]any{
+							{
+								"army_id": "arm-1", "kingdom_id": "kgd-7", "owner_handle": "IronFist",
+								"name": "Vanguard", "mine": true, "status": "home",
+								"composition": map[string]int{"knight": 4},
+							},
+							{
+								"army_id": "arm-9", "kingdom_id": "kgd-9", "owner_handle": "Ragnar",
+								"name": "Raiders", "mine": false, "status": "marching",
+								"composition": map[string]int{"levy": 20},
+							},
+						},
 					},
 					{
 						"id": "reg-2", "name": "Ironvale", "terrain": "hills",
-						"position":  map[string]any{"x": 0.3, "y": 0.4},
-						"adjacency": []string{"reg-1"},
-						"nodes":     []map[string]any{},
+						"position":       map[string]any{"x": 0.3, "y": 0.4},
+						"adjacency":      []string{"reg-1"},
+						"nodes":          []map[string]any{},
+						"visible_armies": []map[string]any{},
 					},
 					{
 						"id": "reg-3", "name": "Mossgrove", "terrain": "plains",
 						"position":         map[string]any{"x": 0.5, "y": 0.6},
 						"adjacency":        []string{"reg-2"},
 						"owner_kingdom_id": nil, "owner_handle": nil,
-						"nodes": []map[string]any{{"id": "nd-9", "resource": "stone", "tier": "standard", "is_home_hoard": true}},
+						"nodes":          []map[string]any{{"id": "nd-9", "resource": "stone", "tier": "standard", "is_home_hoard": true}},
+						"visible_armies": []map[string]any{},
 					},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/kingdoms/kgd-7/march/preview"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"army_previews": []map[string]any{
+					{
+						"army_id": "arm-1", "army_name": "Vanguard",
+						"regions": []map[string]any{
+							{
+								"region_id": "reg-1", "reachable": true, "hops": 0, "duration_seconds": 0,
+								"arrives_at": "2030-01-01T00:00:00Z",
+							},
+							{
+								"region_id": "reg-2", "reachable": true, "hops": 1, "duration_seconds": 3600,
+								"arrives_at": "2030-01-01T01:00:00Z",
+							},
+							{"region_id": "reg-3", "reachable": false},
+						},
+					},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/worlds/wld-1"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "wld-1", "server_id": "srv-1", "slug": "spring-2026",
+				"name": "Spring 2026", "status": "active", "min_players": 8,
+				"t0_at":        "2026-05-01T00:00:00Z",
+				"region_count": 3, "kingdom_count": 2,
+				"my_kingdom": map[string]any{
+					"id": "kgd-7", "world_id": "wld-1",
+					"stockpiles": map[string]any{},
+					"joined_at":  "2026-05-01T00:00:00Z",
 				},
 			})
 		case strings.HasSuffix(r.URL.Path, "/worlds/wld-1/regions/reg-1"):
@@ -140,23 +185,31 @@ func TestRunMap_listsRegionsWithGlyph(t *testing.T) {
 	require.Contains(t, got, "home region, not yet claimed", "home-hoard footnote must appear")
 }
 
-// TestRunMap_showsYourArmies exercises the kingdom-in-scope path: the
-// caller's own armies are bucketed under the region they currently sit
-// in, with composition and a non-home status tag, plus the `your reach:`
-// placeholder for the pending ETA endpoint.
-func TestRunMap_showsYourArmies(t *testing.T) {
-	sess, out, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
+// TestRunMap_showsArmiesAndReach exercises the kingdom-in-scope path:
+// the region's visible armies (your own first, then enemies, with
+// composition and a non-home status tag) are listed under each region,
+// and `your reach:` shows each of your armies' travel ETA — "here" for
+// the current region, an ETA + hop count for a reachable one, and
+// "unreachable" when no path exists.
+func TestRunMap_showsArmiesAndReach(t *testing.T) {
+	sess, out, _ := newTestSession(t, regionsHandler(t))
 	sess.Context.SetServer("acme")
 	sess.Context.SetWorld("spring-2026")
 
 	require.NoError(t, runMap(context.Background(), sess, nil, nil))
 	got := out.String()
+
 	require.Contains(t, got, "armies here:")
-	require.Contains(t, got, "you/Garrison")
-	require.Contains(t, got, "archer=3, levy=12", "army composition must render")
-	require.Contains(t, got, "you/Vanguard")
+	require.Contains(t, got, "you/Vanguard  knight=4", "your own army shows with composition")
+	require.Contains(t, got, "Ragnar/Raiders  levy=20", "visible enemy army shows with owner handle")
 	require.Contains(t, got, "(marching)", "non-home status must be tagged")
-	require.Contains(t, got, "your reach:", "ETA placeholder must appear when a kingdom is in scope")
+	require.Contains(t, got, "armies here: (none)", "empty regions read (none)")
+
+	require.Contains(t, got, "your reach:")
+	require.Contains(t, got, "Vanguard         here", "current region reads here")
+	require.Contains(t, got, "Vanguard         ETA", "reachable region shows an ETA")
+	require.Contains(t, got, "(1 hop)", "single-hop reach is singular")
+	require.Contains(t, got, "unreachable", "pathless region reads unreachable")
 }
 
 func TestRunRegionShow_includesAdjacent(t *testing.T) {

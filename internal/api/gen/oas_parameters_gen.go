@@ -207,6 +207,11 @@ type PreviewBuildUpgradeParams struct {
 	ID       string
 }
 
+// PreviewKingdomMarchesParams is parameters of previewKingdomMarches operation.
+type PreviewKingdomMarchesParams struct {
+	ID string
+}
+
 // PreviewTrainingOrderParams is parameters of previewTrainingOrder operation.
 type PreviewTrainingOrderParams struct {
 	Building PreviewTrainingOrderBuilding

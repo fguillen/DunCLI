@@ -83,15 +83,17 @@ func militaryHandler(t *testing.T, extra map[string]http.HandlerFunc) http.Handl
 				"regions": []map[string]any{
 					{
 						"id": "reg-1", "name": "Greyhollow", "terrain": "forest",
-						"position":  map[string]any{"x": 0.1, "y": 0.2},
-						"adjacency": []string{"reg-2"},
-						"nodes":     []any{},
+						"position":       map[string]any{"x": 0.1, "y": 0.2},
+						"adjacency":      []string{"reg-2"},
+						"nodes":          []any{},
+						"visible_armies": []any{},
 					},
 					{
 						"id": "reg-2", "name": "Ironvale", "terrain": "hills",
-						"position":  map[string]any{"x": 0.3, "y": 0.4},
-						"adjacency": []string{"reg-1"},
-						"nodes":     []any{},
+						"position":       map[string]any{"x": 0.3, "y": 0.4},
+						"adjacency":      []string{"reg-1"},
+						"nodes":          []any{},
+						"visible_armies": []any{},
 					},
 				},
 			})

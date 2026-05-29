@@ -1001,10 +1001,18 @@ curl http://localhost:3000/v1/worlds/01HW.../map \
 `200 OK`:
 
 ```json
-{ "regions": [ { "id": "01HR...", "name": "Ashenfield", "terrain": "plains", "...": "..." } ] }
+{ "regions": [
+  { "id": "01HR...", "name": "Ashenfield", "terrain": "plains", "...": "...",
+    "visible_armies": [
+      { "army_id": "01HA...", "kingdom_id": "01HK...", "owner_handle": "rook",
+        "name": "Vanguard", "mine": false, "status": "home",
+        "composition": { "levy": 25, "archer": 10 } }
+    ] } ] }
 ```
 
 Returns a `RegionSummary` for every region: id, name, terrain, nodes, adjacency. Each region also carries `owner_kingdom_id` and `owner_handle` — the kingdom holding its home-hoard node, or `null` when unclaimed (this includes your own spawn region until you capture its home-hoard — see [§3.5](#35-join-a-world)). That's how the `map` verb shows which player sits where.
+
+Each region also carries `visible_armies` — every army currently sitting there, with its `owner_handle`, `status`, full `composition`, and a `mine` flag for your own armies. v1 is full visibility (§16.9): you see everyone's exact composition. Under v1.1 fog of war, non-visible armies will drop out of the array and `composition` may be bucketed or hidden — both non-breaking, so clients can rely on the shape now.
 
 **Drill into one region.**
 
@@ -1110,6 +1118,27 @@ curl -X POST http://localhost:3000/v1/armies/01HN.../march \
 
 `201 Created`. The backend plans the shortest path on the adjacency graph and computes per-leg time using the slowest unit's speed and the average terrain modifier of both endpoints (§16.10). Knight/Scout-only armies ignore terrain. A `march_arrival` event is scheduled at `arrives_at`.
 
+**Preview ETAs before committing.** To decide *where* to send an army, ask "how long would each army take to reach each region?" without dispatching anything:
+
+```bash
+curl http://localhost:3000/v1/kingdoms/01HK.../march/preview \
+  -H 'Authorization: Bearer k_live_player_xyz...'
+```
+
+`200 OK` — one entry per army your kingdom owns, each with one entry per region on the world:
+
+```json
+{ "army_previews": [
+  { "army_id": "01HA...", "army_name": "Vanguard",
+    "regions": [
+      { "region_id": "01HR...", "reachable": true, "hops": 3,
+        "duration_seconds": 7200, "arrives_at": "2026-05-29T15:00:00Z" },
+      { "region_id": "01HX...", "reachable": false }
+    ] } ] }
+```
+
+It runs the *same* path/speed/terrain math as the actual march, so the previewed `duration_seconds` equals what a real dispatch would set. `arrives_at` is server-clock `now + duration_seconds`. The army's current region reports `hops: 0`; `reachable: false` (no path, or an empty army) omits the timing fields. It's read-only — nothing is scheduled. A kingdom with no armies returns `army_previews: []`.
+
 **The six intents:**
 
 - `attack` — raid a rival kingdom: battle whoever defends the target region and loot their stockpile. You cannot raid your own home region (`422 self_attack`). See [§3.12](#312-attack-and-raid).
@@ -1128,7 +1157,7 @@ curl -X POST http://localhost:3000/v1/armies/01HN.../recall \
 
 `200 OK`. Cancels the pending `march_arrival`, schedules a return march (intent `reinforce`) with the path reversed. v1 charges no unit losses on recall.
 
-See [openapi.yaml](openapi.yaml) — `showArmy`, `splitArmy`, `renameArmy`, `mergeArmy`, `dispatchMarch`, `recallMarch`.
+See [openapi.yaml](openapi.yaml) — `showArmy`, `splitArmy`, `renameArmy`, `mergeArmy`, `dispatchMarch`, `previewKingdomMarches`, `recallMarch`.
 
 ### 3.10 Capture nodes and claim ruins
 

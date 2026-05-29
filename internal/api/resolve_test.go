@@ -201,8 +201,8 @@ func TestResolveRegion_lookupByName(t *testing.T) {
 			method:   "GET",
 			contains: "/v1/worlds/wld-1/map",
 			body: `{"regions":[
-				{"id":"r-1","name":"Greyhollow","terrain":"forest","position":{"x":0,"y":0},"adjacency":[],"nodes":[]},
-				{"id":"r-2","name":"Ironpeak","terrain":"mountain","position":{"x":1,"y":0},"adjacency":[],"nodes":[]}
+				{"id":"r-1","name":"Greyhollow","terrain":"forest","position":{"x":0,"y":0},"adjacency":[],"nodes":[],"visible_armies":[]},
+				{"id":"r-2","name":"Ironpeak","terrain":"mountain","position":{"x":1,"y":0},"adjacency":[],"nodes":[],"visible_armies":[]}
 			]}`,
 		},
 	))

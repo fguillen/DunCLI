@@ -325,6 +325,32 @@ func (c *Client) ShowWorldMap(ctx context.Context, worldID string) ([]gen.Region
 	return out, err
 }
 
+// PreviewKingdomMarches returns a read-only travel estimate for every
+// army the kingdom owns to every region on the world: shortest-path
+// hops, total duration, and arrival ETA, computed with the same math an
+// actual dispatch uses. Backs the `map` verb's "your reach" column.
+func (c *Client) PreviewKingdomMarches(ctx context.Context, kingdomID string) ([]gen.ArmyMarchPreview, error) {
+	var out []gen.ArmyMarchPreview
+	err := c.call(ctx, gen.PreviewKingdomMarchesOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.PreviewKingdomMarches(ctx, gen.PreviewKingdomMarchesParams{ID: kingdomID})
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.MarchPreviewList:
+				out = v.ArmyPreviews
+				return nil
+			case *gen.PreviewKingdomMarchesNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.PreviewKingdomMarchesUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.PreviewKingdomMarchesOperation, res)
+		},
+	)
+	return out, err
+}
+
 // ListKingdomArmies returns the armies belonging to the given kingdom.
 // Backs ResolveArmy.
 func (c *Client) ListKingdomArmies(ctx context.Context, kingdomID string) ([]gen.Army, error) {

@@ -161,15 +161,23 @@ func nodeOwnerLabel(n gen.Node, wild string) string {
 	return owner
 }
 
+// armyReach pairs one of the caller's armies with its travel preview to
+// a particular region, for the `your reach:` block.
+type armyReach struct {
+	name string
+	prev gen.RegionMarchPreview
+}
+
 // runMap implements `map` — prints a multi-line block per region. The
 // header line carries terrain glyph, name, owner (the occupying
 // player's handle, `(wild)`, or `(wild*)` for an unclaimed home
 // region), node count and a hub tag; indented lines below it list the
 // adjacency (by name, resolved via the same map response since
-// RegionSummary.adjacency is a []string of region IDs) and — when the
-// caller has a kingdom in scope — their own armies parked in the
-// region plus a `your reach:` line for the per-army travel ETA the
-// backend will expose later.
+// RegionSummary.adjacency is a []string of region IDs), the armies
+// present in the region (from the map's visibility model — your own and
+// any visible enemies, with composition) and — when the caller has a
+// kingdom in scope — a `your reach:` line giving each of your armies'
+// travel ETA to the region.
 func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
 	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
@@ -189,20 +197,22 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 		byID[r.ID] = r.Name
 	}
 
-	// Enrich with the caller's own armies, bucketed by current region.
+	// Per-army travel ETA to every region, inverted to region → armies.
 	// Degrades gracefully: when the player has no kingdom in this world
 	// (or the lookup fails) the map still renders, just without the
-	// `armies here:` / `your reach:` lines.
-	var myArmies map[string][]gen.Army
+	// `your reach:` line.
+	var reachByRegion map[string][]armyReach
 	if kingdomID, kerr := shared.RequireKingdomID(ctx, sess); kerr == nil {
-		if list, aerr := sess.API.ListKingdomArmies(ctx, kingdomID); aerr == nil {
-			myArmies = make(map[string][]gen.Army, len(list))
-			for _, a := range list {
-				myArmies[a.LocationRegionID] = append(myArmies[a.LocationRegionID], a)
+		if previews, perr := sess.API.PreviewKingdomMarches(ctx, kingdomID); perr == nil {
+			reachByRegion = make(map[string][]armyReach)
+			for _, ap := range previews {
+				for _, rp := range ap.Regions {
+					reachByRegion[rp.RegionID] = append(reachByRegion[rp.RegionID],
+						armyReach{name: ap.ArmyName, prev: rp})
+				}
 			}
 		}
 	}
-	showArmies := myArmies != nil
 
 	type block struct {
 		name string
@@ -211,7 +221,7 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 	blocks := make([]block, 0, len(regions))
 	hasHomeHoard := false
 	for _, r := range regions {
-		text, flagged := mapRegionBlock(r, byID, myArmies, showArmies)
+		text, flagged := mapRegionBlock(r, byID, reachByRegion)
 		if flagged {
 			hasHomeHoard = true
 		}
@@ -232,10 +242,11 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 }
 
 // mapRegionBlock renders one region as a multi-line block for `map`.
-// The bool return reports whether the region was flagged as an
-// unclaimed home region, so the caller can print the `wild*` footnote
-// once.
-func mapRegionBlock(r gen.RegionSummary, nameByID map[string]string, myArmies map[string][]gen.Army, showArmies bool) (string, bool) {
+// reachByRegion is nil when the caller has no kingdom in scope, in which
+// case the `your reach:` line is omitted. The bool return reports
+// whether the region was flagged as an unclaimed home region, so the
+// caller can print the `wild*` footnote once.
+func mapRegionBlock(r gen.RegionSummary, nameByID map[string]string, reachByRegion map[string][]armyReach) (string, bool) {
 	owner := "(wild)"
 	flagged := false
 	if h := optString(r.OwnerHandle); h != "" {
@@ -268,26 +279,96 @@ func mapRegionBlock(r gen.RegionSummary, nameByID map[string]string, myArmies ma
 		lines = append(lines, "    adj: "+strings.Join(adj, ", "))
 	}
 
-	if showArmies {
-		here := append([]gen.Army(nil), myArmies[r.ID]...)
-		if len(here) == 0 {
-			lines = append(lines, "    armies here: (none)")
-		} else {
-			sort.Slice(here, func(i, j int) bool { return here[i].Name < here[j].Name })
-			lines = append(lines, "    armies here:")
-			for _, a := range here {
-				line := fmt.Sprintf("      you/%s  cap=%d  %s",
-					a.Name, a.TotalCapacity, formatComposition(map[string]int(a.Composition)))
-				if a.Status != gen.ArmyStatusHome {
-					line += "  (" + string(a.Status) + ")"
-				}
-				lines = append(lines, line)
-			}
-		}
-		lines = append(lines, "    your reach: (per-army ETA pending a backend preview endpoint)")
+	lines = append(lines, mapArmiesHere(r.VisibleArmies)...)
+
+	if reachByRegion != nil {
+		lines = append(lines, mapYourReach(reachByRegion[r.ID])...)
 	}
 
 	return strings.Join(lines, "\n"), flagged
+}
+
+// mapArmiesHere renders the `armies here:` sub-block from a region's
+// visible armies (your own first, then by name). Each army shows
+// `<handle>/<name>` — `you/<name>` for your own — its composition, and a
+// non-home status tag.
+func mapArmiesHere(armies []gen.VisibleArmy) []string {
+	if len(armies) == 0 {
+		return []string{"    armies here: (none)"}
+	}
+	rows := append([]gen.VisibleArmy(nil), armies...)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Mine != rows[j].Mine {
+			return rows[i].Mine // your own armies first
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	lines := []string{"    armies here:"}
+	for _, a := range rows {
+		who := a.OwnerHandle
+		if a.Mine {
+			who = "you"
+		}
+		comp := "(hidden)"
+		if c, ok := a.Composition.Get(); ok {
+			comp = formatComposition(map[string]int(c))
+		}
+		line := fmt.Sprintf("      %s/%s  %s", who, a.Name, comp)
+		if a.Status != gen.VisibleArmyStatusHome {
+			line += "  (" + string(a.Status) + ")"
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// mapYourReach renders the `your reach:` sub-block: each of your armies'
+// ETA to this region, soonest first (current region, then ascending
+// duration, then unreachable last).
+func mapYourReach(reach []armyReach) []string {
+	if len(reach) == 0 {
+		return []string{"    your reach: (no armies)"}
+	}
+	rows := append([]armyReach(nil), reach...)
+	sort.Slice(rows, func(i, j int) bool {
+		ri, rj := rows[i].prev, rows[j].prev
+		if ri.Reachable != rj.Reachable {
+			return ri.Reachable // reachable before unreachable
+		}
+		di, _ := ri.DurationSeconds.Get()
+		dj, _ := rj.DurationSeconds.Get()
+		if di != dj {
+			return di < dj
+		}
+		return rows[i].name < rows[j].name
+	})
+	lines := []string{"    your reach:"}
+	for _, r := range rows {
+		lines = append(lines, fmt.Sprintf("      %-16s %s", r.name, reachLabel(r.prev)))
+	}
+	return lines
+}
+
+// reachLabel renders one army's travel estimate to a region: "here" for
+// the army's current region, "ETA 2h 15m (3 hops)" for a reachable one,
+// or "unreachable" when no path exists or the army is empty.
+func reachLabel(p gen.RegionMarchPreview) string {
+	if !p.Reachable {
+		return "unreachable"
+	}
+	hops, _ := p.Hops.Get()
+	if hops == 0 {
+		return "here"
+	}
+	eta := "?"
+	if at, ok := p.ArrivesAt.Get(); ok {
+		eta = shared.RelTime(at)
+	}
+	unit := "hops"
+	if hops == 1 {
+		unit = "hop"
+	}
+	return fmt.Sprintf("ETA %s (%d %s)", eta, hops, unit)
 }
 
 // regionHasHomeHoard reports whether any of the region's nodes is a

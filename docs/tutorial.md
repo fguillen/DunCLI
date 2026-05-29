@@ -619,18 +619,22 @@ Map:
   T  Greyhollow        IronFist        nodes=1
       adj: Ironvale
       armies here:
-        you/Vanguard  cap=500  archer=10, levy=25
-      your reach: (per-army ETA pending a backend preview endpoint)
+        you/Vanguard  knight=4
+        Ragnar/Raiders  levy=20  (marching)
+      your reach:
+        Vanguard         here
 
   ^  Ironvale          (wild)          nodes=0
       adj: Greyhollow
       armies here: (none)
-      your reach: (per-army ETA pending a backend preview endpoint)
+      your reach:
+        Vanguard         ETA 1h 0m (1 hop)
 
   .  Mossgrove         (wild*)         nodes=1
       adj: Ironvale
       armies here: (none)
-      your reach: (per-army ETA pending a backend preview endpoint)
+      your reach:
+        Vanguard         unreachable
   wild* = a kingdom's home region, not yet claimed
 ```
 
@@ -644,15 +648,20 @@ kingdom's reserved home region, capturable only by that kingdom and
 never seizable once owned. The footnote prints only when such a region
 is on the map.
 
-The indented lines below each header carry the neighbours (`adj:`) and —
-when you have a kingdom in this world — `armies here:`, listing your own
-armies parked in that region with their capacity and composition (a
-non-`home` status such as `(marching)` is tagged). The `your reach:`
-line is a placeholder: it will show how long each of your armies would
-take to march to the region once the backend exposes a march-preview
-endpoint, so you can compare targets by strike time. Enemy army presence
-likewise awaits a backend addition (the map endpoint exposes only your
-own forces today).
+The indented lines below each header help you plan an objective:
+
+- `adj:` — the region's neighbours, by name.
+- `armies here:` — the armies present in the region, your own first
+  (`you/<name>`) then any visible others (`<handle>/<name>`), each with
+  its composition and a non-`home` status tag such as `(marching)`.
+  Visibility follows the game's fog-of-war model (§16.9); reads
+  `(none)` when no army is present.
+- `your reach:` — for each of your armies, how long it would take to
+  march here, soonest first: `here` for its current region, an ETA with
+  hop count for a reachable one, or `unreachable` when no path exists.
+  This block is omitted when you have no kingdom in the world. The ETA
+  is computed by the backend with the same math an actual dispatch
+  uses, so it matches what you'll get when you commit the march.
 
 Output goes to scrollback — there's no alt-screen and no navigation. To
 "step into" a neighbour, run `region show <neighbour>`. For the
