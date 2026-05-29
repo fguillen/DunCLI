@@ -1197,6 +1197,36 @@ func (c *Client) ListKingdomBattles(ctx context.Context, kingdomID string, limit
 	return battles, total, err
 }
 
+// ListKingdomEvents returns the visible event timeline for the given
+// kingdom — own build/training/march/battle/capture events plus
+// world-public caravan and Wonder events — ordered oldest-first
+// (newest last). `limit` <= 0 falls through to the spec default (10).
+func (c *Client) ListKingdomEvents(ctx context.Context, kingdomID string, limit int) ([]gen.Event, error) {
+	params := gen.ListKingdomEventsParams{KingdomID: kingdomID}
+	if limit > 0 {
+		params.Limit = gen.OptInt{Value: limit, Set: true}
+	}
+	var events []gen.Event
+	err := c.call(ctx, gen.ListKingdomEventsOperation,
+		func(ctx context.Context) (any, error) {
+			return c.gen.ListKingdomEvents(ctx, params)
+		},
+		func(res any, rid string) error {
+			switch v := res.(type) {
+			case *gen.ListKingdomEventsOK:
+				events = v.Events
+				return nil
+			case *gen.ListKingdomEventsNotFound:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			case *gen.ListKingdomEventsUnauthorized:
+				return fromEnvelope((*gen.ErrorEnvelope)(v), rid)
+			}
+			return unexpectedRes(gen.ListKingdomEventsOperation, res)
+		},
+	)
+	return events, err
+}
+
 // ShowBattle fetches one battle by ULID, plus its participant snapshots.
 // The backend returns 404 to anyone who isn't the attacker or defender
 // kingdom owner, so this implicitly serves as an "is this my battle?"

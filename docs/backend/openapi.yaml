@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.3.0"
+  version: "1.4.0"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -76,6 +76,8 @@ tags:
     description: Informational invitations attached to a world; do NOT gate admission (server access still rules).
   - name: Player kingdoms
     description: Per-kingdom dashboard, building queue, and stockpile reads (§6, §10, §16.4).
+  - name: Player events
+    description: Chronological activity feed for a kingdom — own builds/trainings/marches/battles/captures plus world-public trades and Wonder phases.
   - name: Player trade
     description: Caravan dispatch and per-world public trade ledger (§12, §17.2).
   - name: Player wonders
@@ -1643,6 +1645,47 @@ paths:
                   participants:
                     type: array
                     items: { $ref: "#/components/schemas/BattleParticipant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kingdoms/{kingdom_id}/events:
+    parameters:
+      - in: path
+        name: kingdom_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listKingdomEvents
+      tags: [Player events]
+      summary: Chronological activity feed for this kingdom
+      description: |
+        Aggregates events the player can see for this kingdom into a single
+        timeline: the kingdom's own build/training completions, march dispatches,
+        battles, and node captures, plus world-public events (all caravans in the
+        public trade ledger and every Wonder's phase changes). Returns the most
+        recent `limit` events ordered oldest-first (newest last). Default limit
+        is 10; max 100. Visible only to the player who owns the kingdom.
+
+        Captures lack a dedicated timestamp; they are derived from capture-march
+        arrivals where the kingdom ended up owning a node in the target region, so
+        a node captured and later lost may still appear.
+      security: [{ playerBearer: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      responses:
+        "200":
+          description: Event feed, oldest-first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -3246,6 +3289,19 @@ components:
         defender_casualties: { $ref: "#/components/schemas/Composition" }
         walls_damage: { type: integer, minimum: 0 }
         walls_level_after: { type: integer, minimum: 0 }
+
+    Event:
+      type: object
+      required: [occurred_at, type, description]
+      properties:
+        occurred_at: { type: string, format: date-time }
+        type:
+          type: string
+          enum: [build, training, march, battle, capture, wonder, trade]
+          description: Event category. `battle` covers both attacks and defenses.
+        description:
+          type: string
+          description: Human-readable summary, e.g. 'Building "barracks" finished upgrading to L3.'
 
     Battle:
       type: object

@@ -124,6 +124,12 @@ type ListKingdomBuildingsParams struct {
 	KingdomID       string
 }
 
+// ListKingdomEventsParams is parameters of listKingdomEvents operation.
+type ListKingdomEventsParams struct {
+	Limit     OptInt `json:",omitempty,omitzero"`
+	KingdomID string
+}
+
 // ListNodesParams is parameters of listNodes operation.
 type ListNodesParams struct {
 	WorldID string

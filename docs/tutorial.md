@@ -739,6 +739,26 @@ by the backend on every call against current production rates and the
 warehouse cap. ETAs in the in-progress sections are relative (e.g.
 `ETA 2h 14m`).
 
+### `events [<num>]` — your kingdom's recent timeline
+
+```
+dun> events
+Recent events:
+  2026-05-20 09:00 UTC  build     Building "barracks" finished upgrading to L3.
+  2026-05-20 11:30 UTC  battle    Defended Greyhollow against Ragnar.
+```
+
+A single feed of everything your kingdom can see: your own
+build/training completions, march dispatches, battles, node captures,
+plus the world-public caravan and Wonder phase changes. Lines are
+ordered **oldest first** (newest last), each tagged with its category
+(`build`, `training`, `march`, `battle`, `capture`, `wonder`,
+`trade`).
+
+`<num>` is optional — how many of the most recent events to show
+(1–100, default 10). Requires a kingdom: join a world first
+(`world join <slug>`), otherwise you'll get a "no kingdom" error.
+
 ### `buildings [--upgradable]`
 
 Lists one row per building kind in your kingdom.

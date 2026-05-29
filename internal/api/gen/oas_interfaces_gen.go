@@ -113,6 +113,10 @@ type ListKingdomBuildingsRes interface {
 	listKingdomBuildingsRes()
 }
 
+type ListKingdomEventsRes interface {
+	listKingdomEventsRes()
+}
+
 type ListNodesRes interface {
 	listNodesRes()
 }

@@ -2684,6 +2684,122 @@ func (s *ErrorEnvelopeError) SetRetryAfter(val OptInt) {
 	s.RetryAfter = val
 }
 
+// Ref: #/components/schemas/Event
+type Event struct {
+	OccurredAt time.Time `json:"occurred_at"`
+	// Event category. `battle` covers both attacks and defenses.
+	Type EventType `json:"type"`
+	// Human-readable summary, e.g. 'Building "barracks" finished upgrading to L3.'.
+	Description string `json:"description"`
+}
+
+// GetOccurredAt returns the value of OccurredAt.
+func (s *Event) GetOccurredAt() time.Time {
+	return s.OccurredAt
+}
+
+// GetType returns the value of Type.
+func (s *Event) GetType() EventType {
+	return s.Type
+}
+
+// GetDescription returns the value of Description.
+func (s *Event) GetDescription() string {
+	return s.Description
+}
+
+// SetOccurredAt sets the value of OccurredAt.
+func (s *Event) SetOccurredAt(val time.Time) {
+	s.OccurredAt = val
+}
+
+// SetType sets the value of Type.
+func (s *Event) SetType(val EventType) {
+	s.Type = val
+}
+
+// SetDescription sets the value of Description.
+func (s *Event) SetDescription(val string) {
+	s.Description = val
+}
+
+// Event category. `battle` covers both attacks and defenses.
+type EventType string
+
+const (
+	EventTypeBuild    EventType = "build"
+	EventTypeTraining EventType = "training"
+	EventTypeMarch    EventType = "march"
+	EventTypeBattle   EventType = "battle"
+	EventTypeCapture  EventType = "capture"
+	EventTypeWonder   EventType = "wonder"
+	EventTypeTrade    EventType = "trade"
+)
+
+// AllValues returns all EventType values.
+func (EventType) AllValues() []EventType {
+	return []EventType{
+		EventTypeBuild,
+		EventTypeTraining,
+		EventTypeMarch,
+		EventTypeBattle,
+		EventTypeCapture,
+		EventTypeWonder,
+		EventTypeTrade,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s EventType) MarshalText() ([]byte, error) {
+	switch s {
+	case EventTypeBuild:
+		return []byte(s), nil
+	case EventTypeTraining:
+		return []byte(s), nil
+	case EventTypeMarch:
+		return []byte(s), nil
+	case EventTypeBattle:
+		return []byte(s), nil
+	case EventTypeCapture:
+		return []byte(s), nil
+	case EventTypeWonder:
+		return []byte(s), nil
+	case EventTypeTrade:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *EventType) UnmarshalText(data []byte) error {
+	switch EventType(data) {
+	case EventTypeBuild:
+		*s = EventTypeBuild
+		return nil
+	case EventTypeTraining:
+		*s = EventTypeTraining
+		return nil
+	case EventTypeMarch:
+		*s = EventTypeMarch
+		return nil
+	case EventTypeBattle:
+		*s = EventTypeBattle
+		return nil
+	case EventTypeCapture:
+		*s = EventTypeCapture
+		return nil
+	case EventTypeWonder:
+		*s = EventTypeWonder
+		return nil
+	case EventTypeTrade:
+		*s = EventTypeTrade
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type ExchangeAdminMagicLinkReq struct {
 	Token string `json:"token"`
 }
@@ -4420,6 +4536,30 @@ func (s *ListKingdomBuildingsUpgradePossible) UnmarshalText(data []byte) error {
 		return errors.Errorf("invalid value: %q", data)
 	}
 }
+
+type ListKingdomEventsNotFound ErrorEnvelope
+
+func (*ListKingdomEventsNotFound) listKingdomEventsRes() {}
+
+type ListKingdomEventsOK struct {
+	Events []Event `json:"events"`
+}
+
+// GetEvents returns the value of Events.
+func (s *ListKingdomEventsOK) GetEvents() []Event {
+	return s.Events
+}
+
+// SetEvents sets the value of Events.
+func (s *ListKingdomEventsOK) SetEvents(val []Event) {
+	s.Events = val
+}
+
+func (*ListKingdomEventsOK) listKingdomEventsRes() {}
+
+type ListKingdomEventsUnauthorized ErrorEnvelope
+
+func (*ListKingdomEventsUnauthorized) listKingdomEventsRes() {}
 
 type ListNodesNotFound ErrorEnvelope
 

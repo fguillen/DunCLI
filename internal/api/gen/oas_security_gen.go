@@ -83,6 +83,7 @@ var operationRolesPlayerBearer = map[string][]string{
 	ListKingdomArmiesOperation:    []string{},
 	ListKingdomBattlesOperation:   []string{},
 	ListKingdomBuildingsOperation: []string{},
+	ListKingdomEventsOperation:    []string{},
 	ListNodesOperation:            []string{},
 	ListPlayerApiKeysOperation:    []string{},
 	ListPlayerServersOperation:    []string{},

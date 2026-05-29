@@ -35,6 +35,7 @@ const (
 	ListKingdomArmiesOperation       OperationName = "ListKingdomArmies"
 	ListKingdomBattlesOperation      OperationName = "ListKingdomBattles"
 	ListKingdomBuildingsOperation    OperationName = "ListKingdomBuildings"
+	ListKingdomEventsOperation       OperationName = "ListKingdomEvents"
 	ListNodesOperation               OperationName = "ListNodes"
 	ListPlayerApiKeysOperation       OperationName = "ListPlayerApiKeys"
 	ListPlayerServersOperation       OperationName = "ListPlayerServers"
