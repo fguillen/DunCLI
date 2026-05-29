@@ -755,11 +755,11 @@ func (s *ArmyStatus) UnmarshalText(data []byte) error {
 
 // Ref: #/components/schemas/Battle
 type Battle struct {
-	ID                string `json:"id"`
-	WorldID           string `json:"world_id"`
-	RegionID          string `json:"region_id"`
-	AttackerKingdomID string `json:"attacker_kingdom_id"`
-	DefenderKingdomID string `json:"defender_kingdom_id"`
+	ID                string       `json:"id"`
+	WorldID           string       `json:"world_id"`
+	RegionID          string       `json:"region_id"`
+	AttackerKingdomID string       `json:"attacker_kingdom_id"`
+	DefenderKingdomID OptNilString `json:"defender_kingdom_id"`
 	// Rendered title for the attacker (§17.4).
 	AttackerTitle OptNilString `json:"attacker_title"`
 	// Rendered title for the defender (§17.4).
@@ -796,7 +796,7 @@ func (s *Battle) GetAttackerKingdomID() string {
 }
 
 // GetDefenderKingdomID returns the value of DefenderKingdomID.
-func (s *Battle) GetDefenderKingdomID() string {
+func (s *Battle) GetDefenderKingdomID() OptNilString {
 	return s.DefenderKingdomID
 }
 
@@ -861,7 +861,7 @@ func (s *Battle) SetAttackerKingdomID(val string) {
 }
 
 // SetDefenderKingdomID sets the value of DefenderKingdomID.
-func (s *Battle) SetDefenderKingdomID(val string) {
+func (s *Battle) SetDefenderKingdomID(val OptNilString) {
 	s.DefenderKingdomID = val
 }
 

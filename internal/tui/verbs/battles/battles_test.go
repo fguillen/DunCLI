@@ -13,13 +13,13 @@ import (
 	"github.com/fguillen/dun-cli/internal/tui/shell"
 )
 
-// One PvP battle (defender_kingdom_id non-empty) and one wilderness
-// battle (defender_kingdom_id="") so render decisions both fire.
+// One PvP battle (defender_kingdom_id set) and one wilderness battle
+// (defender_kingdom_id=null) so render decisions both fire.
 const battlesListBody = `{
 	"battles": [
 		{
 			"id": "bat-9", "world_id": "wld-1", "region_id": "reg-1",
-			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": "",
+			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": null,
 			"outcome": "attacker_victory",
 			"loot": {"gold": 120, "wood": 40},
 			"log": [{"round": 1, "attacker_damage_dealt": 40, "defender_damage_dealt": 10,
@@ -54,7 +54,7 @@ func TestRunBattlesList_rendersWildernessMarkerAndOpponentID(t *testing.T) {
 	got := out.String()
 	require.Contains(t, got, "Battles (showing 1-2 of 2):")
 	require.Contains(t, got, "bat-9")
-	require.Contains(t, got, "(wilderness)") // defender empty → marker
+	require.Contains(t, got, "(wilderness)") // defender null → marker
 	// PvP row: caller is the defender (kgd-1), so the opponent rendered
 	// is the attacker (kgd-2). Short test IDs are kept verbatim.
 	require.Contains(t, got, "vs kgd-2")
@@ -190,7 +190,7 @@ func TestRunBattleShow_wildernessRendersMarker(t *testing.T) {
 			_, _ = w.Write([]byte(`{
 				"battle": {
 					"id": "bat-9", "world_id": "wld-1", "region_id": "reg-1",
-					"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": "",
+					"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": null,
 					"outcome": "attacker_victory",
 					"loot": {},
 					"log": [{"round": 1, "attacker_damage_dealt": 4, "defender_damage_dealt": 1,

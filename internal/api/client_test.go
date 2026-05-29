@@ -420,7 +420,9 @@ func TestClient_ListKingdomBattles_propagatesParams(t *testing.T) {
 	require.Equal(t, 1, total)
 	require.Len(t, battles, 1)
 	require.Equal(t, "bat-1", battles[0].ID)
-	require.Equal(t, "kgd-2", battles[0].DefenderKingdomID)
+	defID, ok := battles[0].DefenderKingdomID.Get()
+	require.True(t, ok)
+	require.Equal(t, "kgd-2", defID)
 }
 
 func TestClient_ListKingdomBattles_omitsUnsetParams(t *testing.T) {
@@ -442,7 +444,7 @@ func TestClient_ShowBattle_decodesParticipants(t *testing.T) {
 		}
 		writeJSON(t, w, `{"battle": {
 			"id": "bat-9", "world_id": "wld-1", "region_id": "reg-a",
-			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": "",
+			"attacker_kingdom_id": "kgd-1", "defender_kingdom_id": null,
 			"outcome": "attacker_victory",
 			"loot": {},
 			"log": [{"round": 1, "attacker_damage_dealt": 4, "defender_damage_dealt": 1,
@@ -462,7 +464,8 @@ func TestClient_ShowBattle_decodesParticipants(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, battle)
 	require.Equal(t, "bat-9", battle.ID)
-	require.Equal(t, "", battle.DefenderKingdomID, "wilderness battle has empty defender")
+	_, ok := battle.DefenderKingdomID.Get()
+	require.False(t, ok, "wilderness battle has no defender (null)")
 	require.Len(t, parts, 1)
 	require.Equal(t, gen.BattleParticipantSideAttacker, parts[0].Side)
 }

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.4.0"
+  version: "1.4.1"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -3306,14 +3306,14 @@ components:
     Battle:
       type: object
       required:
-        [ id, world_id, region_id, attacker_kingdom_id, defender_kingdom_id,
+        [ id, world_id, region_id, attacker_kingdom_id,
           outcome, loot, log, started_at, ended_at ]
       properties:
         id: { type: string }
         world_id: { type: string }
         region_id: { type: string }
         attacker_kingdom_id: { type: string }
-        defender_kingdom_id: { type: string }
+        defender_kingdom_id: { type: string, nullable: true }
         attacker_title: { type: string, nullable: true, description: "Rendered title for the attacker (§17.4)." }
         defender_title: { type: string, nullable: true, description: "Rendered title for the defender (§17.4)." }
         march_order_id: { type: string, nullable: true }

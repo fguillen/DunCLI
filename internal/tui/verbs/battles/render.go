@@ -95,17 +95,18 @@ func regionLabel(regionID string, regionNameByID map[string]string) string {
 }
 
 // opponentLabel renders the "other side" of a battle relative to the
-// caller. Wilderness battles (empty defender_kingdom_id) collapse to
-// the wilderness marker. When the caller defended, the opponent is
+// caller. Wilderness battles (null/absent defender_kingdom_id) collapse
+// to the wilderness marker. When the caller defended, the opponent is
 // the attacker; otherwise it's the defender.
 func opponentLabel(b gen.Battle, callerKingdomID string) string {
-	if b.DefenderKingdomID == "" {
+	defID, ok := b.DefenderKingdomID.Get()
+	if !ok || defID == "" {
 		return "(wilderness)"
 	}
-	if b.DefenderKingdomID == callerKingdomID {
+	if defID == callerKingdomID {
 		return shortKingdom(b.AttackerKingdomID)
 	}
-	return shortKingdom(b.DefenderKingdomID)
+	return shortKingdom(defID)
 }
 
 // printBattleList renders the `battles` table.

@@ -1354,8 +1354,10 @@ func (s *Battle) encodeFields(e *jx.Encoder) {
 		e.Str(s.AttackerKingdomID)
 	}
 	{
-		e.FieldStart("defender_kingdom_id")
-		e.Str(s.DefenderKingdomID)
+		if s.DefenderKingdomID.Set {
+			e.FieldStart("defender_kingdom_id")
+			s.DefenderKingdomID.Encode(e)
+		}
 	}
 	{
 		if s.AttackerTitle.Set {
@@ -1475,11 +1477,9 @@ func (s *Battle) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"attacker_kingdom_id\"")
 			}
 		case "defender_kingdom_id":
-			requiredBitSet[0] |= 1 << 4
 			if err := func() error {
-				v, err := d.Str()
-				s.DefenderKingdomID = string(v)
-				if err != nil {
+				s.DefenderKingdomID.Reset()
+				if err := s.DefenderKingdomID.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -1588,7 +1588,7 @@ func (s *Battle) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
-		0b00011111,
+		0b00001111,
 		0b00011111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {

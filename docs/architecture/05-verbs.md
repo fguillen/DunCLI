@@ -584,13 +584,13 @@ The existing list of flagged candidates as of Phase 8:
   `name_taken`, `army_not_home`, `insufficient_units`, …) are not in
   the enum, so they arrive as `code: "invalid"` with the real code in
   `message` — the CLI can't switch on the specific cause.
-- Phase 9: `Battle.defender_kingdom_id` is `type: string` and listed
-  in `required:`, but a wilderness / ruin-claim battle has no
-  defending kingdom — the backend has been emitting empty string in
-  practice. Either marking the field `nullable: true` (and dropping
-  it from `required`) or replacing it with a typed `battle_type`
-  discriminator would let the CLI render wilderness vs PvP without
-  the "empty string means wilderness" workaround.
+- Phase 9 (resolved in backend OpenAPI 1.4.1): `Battle.defender_kingdom_id`
+  was `type: string` and listed in `required:`, but a wilderness /
+  ruin-claim battle has no defending kingdom. The backend originally
+  emitted empty string, then switched to `null`, which broke the
+  strict decoder. Resolved by marking the field `nullable: true` and
+  dropping it from `required`; the CLI now reads it as `OptNilString`
+  and renders `(wilderness)` when unset/null.
 - Phase 9: no `(world_id, kingdom_id) → owner_handle` resolver
   exists. `battles` and `battle show` render the opponent kingdom as
   a truncated ULID. Embedding `attacker_handle` / `defender_handle`
