@@ -51,6 +51,13 @@ func regionsHandler(t *testing.T) http.HandlerFunc {
 						"adjacency": []string{"reg-1"},
 						"nodes":     []map[string]any{},
 					},
+					{
+						"id": "reg-3", "name": "Mossgrove", "terrain": "plains",
+						"position":         map[string]any{"x": 0.5, "y": 0.6},
+						"adjacency":        []string{"reg-2"},
+						"owner_kingdom_id": nil, "owner_handle": nil,
+						"nodes": []map[string]any{{"id": "nd-9", "resource": "stone", "tier": "standard", "is_home_hoard": true}},
+					},
 				},
 			})
 		case strings.HasSuffix(r.URL.Path, "/worlds/wld-1/regions/reg-1"):
@@ -129,6 +136,8 @@ func TestRunMap_listsRegionsWithGlyph(t *testing.T) {
 	require.Contains(t, got, "adj=Ironvale")
 	require.Contains(t, got, "IronFist", "owned region must show the owner handle")
 	require.Contains(t, got, "(wild)", "unclaimed region must show (wild)")
+	require.Contains(t, got, "(wild*)", "unclaimed home region must show (wild*)")
+	require.Contains(t, got, "home region, not yet claimed", "home-hoard footnote must appear")
 }
 
 func TestRunRegionShow_includesAdjacent(t *testing.T) {

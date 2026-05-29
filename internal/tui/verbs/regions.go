@@ -186,6 +186,7 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 	}
 
 	lines := make([]string, 0, len(regions))
+	hasHomeHoard := false
 	for _, r := range regions {
 		adj := make([]string, 0, len(r.Adjacency))
 		for _, id := range r.Adjacency {
@@ -198,6 +199,11 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 		owner := "(wild)"
 		if h := optString(r.OwnerHandle); h != "" {
 			owner = h
+		} else if regionHasHomeHoard(r) {
+			// Unclaimed, but a home-hoard node reserves it for a
+			// specific spawn kingdom — mark it apart from open wilderness.
+			owner = "(wild*)"
+			hasHomeHoard = true
 		}
 		lines = append(lines, fmt.Sprintf("%s  %-16s  %-14s  nodes=%d  adj=%s",
 			terrainGlyph(string(r.Terrain)),
@@ -209,7 +215,21 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 	}
 	sort.Strings(lines)
 	shell.Section(sess.Out, "Map:", strings.Join(lines, "\n"))
+	if hasHomeHoard {
+		shell.Info(sess.Out, "  wild* = a kingdom's home region, not yet claimed")
+	}
 	return nil
+}
+
+// regionHasHomeHoard reports whether any of the region's nodes is a
+// home-hoard — the node a spawn kingdom permanently owns once claimed.
+func regionHasHomeHoard(r gen.RegionSummary) bool {
+	for _, n := range r.Nodes {
+		if n.IsHomeHoard {
+			return true
+		}
+	}
+	return false
 }
 
 // runRegionShow implements `region show <name>`. Fires showRegion +

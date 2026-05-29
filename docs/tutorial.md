@@ -618,12 +618,18 @@ dun> map
 Map:
   T  Greyhollow        IronFist        nodes=1  adj=Ironvale
   ^  Ironvale          (wild)          nodes=0  adj=Greyhollow
+  .  Mossgrove         (wild*)         nodes=1  adj=Ironvale
+  wild* = a kingdom's home region, not yet claimed
 ```
 
 The first column is a terrain glyph: `.` plains, `T` forest, `^`
 hills, `M` mountain, `~` marsh. The next column is the controlling
 player's handle — or `(wild)` for an unclaimed region — so a single
-`map` answers both "where is everything" and "who is where." Output
+`map` answers both "where is everything" and "who is where." A `(wild*)`
+marker flags an unclaimed region that holds a home-hoard node: it's a
+kingdom's reserved home region, capturable only by that kingdom and
+never seizable once owned. The footnote prints only when such a region
+is on the map. Output
 goes to scrollback — there's no alt-screen and no navigation. To
 "step into" a neighbour, run `region show <neighbour>`. For the
 companion roster (who's playing, with progress), see `kingdoms`.
