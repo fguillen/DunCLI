@@ -161,11 +161,15 @@ func nodeOwnerLabel(n gen.Node, wild string) string {
 	return owner
 }
 
-// runMap implements `map` — prints one styled line per region. The
-// adjacency list is rendered by name (resolved via the same map
-// response, since RegionSummary.adjacency is a []string of region
-// IDs). The owner column shows the occupying player's handle, or
-// `(wild)` for an unclaimed region.
+// runMap implements `map` — prints a multi-line block per region. The
+// header line carries terrain glyph, name, owner (the occupying
+// player's handle, `(wild)`, or `(wild*)` for an unclaimed home
+// region), node count and a hub tag; indented lines below it list the
+// adjacency (by name, resolved via the same map response since
+// RegionSummary.adjacency is a []string of region IDs) and — when the
+// caller has a kingdom in scope — their own armies parked in the
+// region plus a `your reach:` line for the per-army travel ETA the
+// backend will expose later.
 func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]string) error {
 	worldID, err := shared.RequireWorldID(ctx, sess)
 	if err != nil {
@@ -185,40 +189,105 @@ func runMap(ctx context.Context, sess *shell.Session, _ []string, _ map[string]s
 		byID[r.ID] = r.Name
 	}
 
-	lines := make([]string, 0, len(regions))
-	hasHomeHoard := false
-	for _, r := range regions {
-		adj := make([]string, 0, len(r.Adjacency))
-		for _, id := range r.Adjacency {
-			if name, ok := byID[id]; ok {
-				adj = append(adj, name)
-			} else {
-				adj = append(adj, id)
+	// Enrich with the caller's own armies, bucketed by current region.
+	// Degrades gracefully: when the player has no kingdom in this world
+	// (or the lookup fails) the map still renders, just without the
+	// `armies here:` / `your reach:` lines.
+	var myArmies map[string][]gen.Army
+	if kingdomID, kerr := shared.RequireKingdomID(ctx, sess); kerr == nil {
+		if list, aerr := sess.API.ListKingdomArmies(ctx, kingdomID); aerr == nil {
+			myArmies = make(map[string][]gen.Army, len(list))
+			for _, a := range list {
+				myArmies[a.LocationRegionID] = append(myArmies[a.LocationRegionID], a)
 			}
 		}
-		owner := "(wild)"
-		if h := optString(r.OwnerHandle); h != "" {
-			owner = h
-		} else if regionHasHomeHoard(r) {
-			// Unclaimed, but a home-hoard node reserves it for a
-			// specific spawn kingdom — mark it apart from open wilderness.
-			owner = "(wild*)"
+	}
+	showArmies := myArmies != nil
+
+	type block struct {
+		name string
+		text string
+	}
+	blocks := make([]block, 0, len(regions))
+	hasHomeHoard := false
+	for _, r := range regions {
+		text, flagged := mapRegionBlock(r, byID, myArmies, showArmies)
+		if flagged {
 			hasHomeHoard = true
 		}
-		lines = append(lines, fmt.Sprintf("%s  %-16s  %-14s  nodes=%d  adj=%s",
-			terrainGlyph(string(r.Terrain)),
-			r.Name,
-			owner,
-			len(r.Nodes),
-			strings.Join(adj, ", "),
-		))
+		blocks = append(blocks, block{name: r.Name, text: text})
 	}
-	sort.Strings(lines)
-	shell.Section(sess.Out, "Map:", strings.Join(lines, "\n"))
+	sort.Slice(blocks, func(i, j int) bool { return blocks[i].name < blocks[j].name })
+
+	parts := make([]string, len(blocks))
+	for i, b := range blocks {
+		parts[i] = b.text
+	}
+	// A blank line between blocks keeps the multi-line layout scannable.
+	shell.Section(sess.Out, "Map:", strings.Join(parts, "\n\n"))
 	if hasHomeHoard {
 		shell.Info(sess.Out, "  wild* = a kingdom's home region, not yet claimed")
 	}
 	return nil
+}
+
+// mapRegionBlock renders one region as a multi-line block for `map`.
+// The bool return reports whether the region was flagged as an
+// unclaimed home region, so the caller can print the `wild*` footnote
+// once.
+func mapRegionBlock(r gen.RegionSummary, nameByID map[string]string, myArmies map[string][]gen.Army, showArmies bool) (string, bool) {
+	owner := "(wild)"
+	flagged := false
+	if h := optString(r.OwnerHandle); h != "" {
+		owner = h
+	} else if regionHasHomeHoard(r) {
+		// Unclaimed, but a home-hoard node reserves it for a specific
+		// spawn kingdom — mark it apart from open wilderness.
+		owner = "(wild*)"
+		flagged = true
+	}
+
+	header := fmt.Sprintf("%s  %-16s  %-14s  nodes=%d",
+		terrainGlyph(string(r.Terrain)), r.Name, owner, len(r.Nodes))
+	if hub, ok := r.IsHub.Get(); ok && hub {
+		header += "  hub"
+	}
+	lines := []string{header}
+
+	adj := make([]string, 0, len(r.Adjacency))
+	for _, id := range r.Adjacency {
+		if name, ok := nameByID[id]; ok {
+			adj = append(adj, name)
+		} else {
+			adj = append(adj, id)
+		}
+	}
+	if len(adj) == 0 {
+		lines = append(lines, "    adj: (none)")
+	} else {
+		lines = append(lines, "    adj: "+strings.Join(adj, ", "))
+	}
+
+	if showArmies {
+		here := append([]gen.Army(nil), myArmies[r.ID]...)
+		if len(here) == 0 {
+			lines = append(lines, "    armies here: (none)")
+		} else {
+			sort.Slice(here, func(i, j int) bool { return here[i].Name < here[j].Name })
+			lines = append(lines, "    armies here:")
+			for _, a := range here {
+				line := fmt.Sprintf("      you/%s  cap=%d  %s",
+					a.Name, a.TotalCapacity, formatComposition(map[string]int(a.Composition)))
+				if a.Status != gen.ArmyStatusHome {
+					line += "  (" + string(a.Status) + ")"
+				}
+				lines = append(lines, line)
+			}
+		}
+		lines = append(lines, "    your reach: (per-army ETA pending a backend preview endpoint)")
+	}
+
+	return strings.Join(lines, "\n"), flagged
 }
 
 // regionHasHomeHoard reports whether any of the region's nodes is a

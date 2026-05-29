@@ -616,21 +616,45 @@ error: not in a world scope — try `world join <slug>` first
 ```
 dun> map
 Map:
-  T  Greyhollow        IronFist        nodes=1  adj=Ironvale
-  ^  Ironvale          (wild)          nodes=0  adj=Greyhollow
-  .  Mossgrove         (wild*)         nodes=1  adj=Ironvale
+  T  Greyhollow        IronFist        nodes=1
+      adj: Ironvale
+      armies here:
+        you/Vanguard  cap=500  archer=10, levy=25
+      your reach: (per-army ETA pending a backend preview endpoint)
+
+  ^  Ironvale          (wild)          nodes=0
+      adj: Greyhollow
+      armies here: (none)
+      your reach: (per-army ETA pending a backend preview endpoint)
+
+  .  Mossgrove         (wild*)         nodes=1
+      adj: Ironvale
+      armies here: (none)
+      your reach: (per-army ETA pending a backend preview endpoint)
   wild* = a kingdom's home region, not yet claimed
 ```
 
-The first column is a terrain glyph: `.` plains, `T` forest, `^`
-hills, `M` mountain, `~` marsh. The next column is the controlling
-player's handle — or `(wild)` for an unclaimed region — so a single
-`map` answers both "where is everything" and "who is where." A `(wild*)`
+Each region prints as a block. The header line opens with a terrain
+glyph: `.` plains, `T` forest, `^` hills, `M` mountain, `~` marsh. Next
+is the controlling player's handle — or `(wild)` for an unclaimed region
+— then the node count and a `hub` tag for trade hubs, so a single `map`
+answers both "where is everything" and "who is where." A `(wild*)`
 marker flags an unclaimed region that holds a home-hoard node: it's a
 kingdom's reserved home region, capturable only by that kingdom and
 never seizable once owned. The footnote prints only when such a region
-is on the map. Output
-goes to scrollback — there's no alt-screen and no navigation. To
+is on the map.
+
+The indented lines below each header carry the neighbours (`adj:`) and —
+when you have a kingdom in this world — `armies here:`, listing your own
+armies parked in that region with their capacity and composition (a
+non-`home` status such as `(marching)` is tagged). The `your reach:`
+line is a placeholder: it will show how long each of your armies would
+take to march to the region once the backend exposes a march-preview
+endpoint, so you can compare targets by strike time. Enemy army presence
+likewise awaits a backend addition (the map endpoint exposes only your
+own forces today).
+
+Output goes to scrollback — there's no alt-screen and no navigation. To
 "step into" a neighbour, run `region show <neighbour>`. For the
 companion roster (who's playing, with progress), see `kingdoms`.
 

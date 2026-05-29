@@ -133,11 +133,30 @@ func TestRunMap_listsRegionsWithGlyph(t *testing.T) {
 	require.Contains(t, got, "Ironvale")
 	require.Contains(t, got, "T  ", "forest glyph must appear")
 	require.Contains(t, got, "^  ", "hills glyph must appear")
-	require.Contains(t, got, "adj=Ironvale")
+	require.Contains(t, got, "adj: Ironvale")
 	require.Contains(t, got, "IronFist", "owned region must show the owner handle")
 	require.Contains(t, got, "(wild)", "unclaimed region must show (wild)")
 	require.Contains(t, got, "(wild*)", "unclaimed home region must show (wild*)")
 	require.Contains(t, got, "home region, not yet claimed", "home-hoard footnote must appear")
+}
+
+// TestRunMap_showsYourArmies exercises the kingdom-in-scope path: the
+// caller's own armies are bucketed under the region they currently sit
+// in, with composition and a non-home status tag, plus the `your reach:`
+// placeholder for the pending ETA endpoint.
+func TestRunMap_showsYourArmies(t *testing.T) {
+	sess, out, _ := newTestSession(t, expeditionsHandler(t, nodesFixture, ruinsFixture, armiesFixture))
+	sess.Context.SetServer("acme")
+	sess.Context.SetWorld("spring-2026")
+
+	require.NoError(t, runMap(context.Background(), sess, nil, nil))
+	got := out.String()
+	require.Contains(t, got, "armies here:")
+	require.Contains(t, got, "you/Garrison")
+	require.Contains(t, got, "archer=3, levy=12", "army composition must render")
+	require.Contains(t, got, "you/Vanguard")
+	require.Contains(t, got, "(marching)", "non-home status must be tagged")
+	require.Contains(t, got, "your reach:", "ETA placeholder must appear when a kingdom is in scope")
 }
 
 func TestRunRegionShow_includesAdjacent(t *testing.T) {
