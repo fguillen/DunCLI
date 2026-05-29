@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: dun HTTP API
-  version: "1.5.0"
+  version: "1.6.1"
   description: |
     JSON API for the `dun` backend. The CLI gem and any future integration
     consume only this surface.
@@ -2852,6 +2852,11 @@ components:
             home-hoard is permanently reserved for its home kingdom: only that
             kingdom may capture it, and once owned it can never be seized
             (other kingdoms' captures are rejected with `home_hoard_protected`).
+        owner_kingdom_id: { type: string, nullable: true }
+        owner_handle:
+          type: string
+          nullable: true
+          description: Handle of the owning kingdom's player. Null when the node is wilderness.
 
     Node:
       allOf:
@@ -2859,11 +2864,6 @@ components:
         - type: object
           properties:
             base_rate: { type: integer }
-            owner_kingdom_id: { type: string, nullable: true }
-            owner_handle:
-              type: string
-              nullable: true
-              description: Handle of the owning kingdom's player. Null when the node is wilderness.
             region_id: { type: string }
             region_name: { type: string }
             garrison:
@@ -2941,7 +2941,11 @@ components:
         owner_kingdom_id:
           type: string
           nullable: true
-          description: Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+          description: >-
+            Kingdom that owns this region. For a region with a home-hoard node
+            this is that node's owner; otherwise it is the kingdom owning the
+            region's node(s). Null when unclaimed or contested (nodes owned by
+            different kingdoms).
         owner_handle:
           type: string
           nullable: true
@@ -2986,7 +2990,11 @@ components:
         owner_kingdom_id:
           type: string
           nullable: true
-          description: Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+          description: >-
+            Kingdom that owns this region. For a region with a home-hoard node
+            this is that node's owner; otherwise it is the kingdom owning the
+            region's node(s). Null when unclaimed or contested (nodes owned by
+            different kingdoms).
         owner_handle:
           type: string
           nullable: true
@@ -3447,11 +3455,11 @@ components:
 
     BattleParticipant:
       type: object
-      required: [id, battle_id, kingdom_id, side, starting_composition, ending_composition, casualties]
+      required: [id, battle_id, side, starting_composition, ending_composition, casualties]
       properties:
         id: { type: string }
         battle_id: { type: string }
-        kingdom_id: { type: string }
+        kingdom_id: { type: string, nullable: true }
         army_id: { type: string, nullable: true }
         side: { type: string, enum: [attacker, defender] }
         starting_composition: { $ref: "#/components/schemas/Composition" }

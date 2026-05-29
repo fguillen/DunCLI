@@ -203,7 +203,12 @@ func TestRunBattleShow_wildernessRendersMarker(t *testing.T) {
 					 "side": "attacker", "army_id": "arm-1",
 					 "starting_composition": {"levy": 10},
 					 "ending_composition": {"levy": 9},
-					 "casualties": {"levy": 1}}
+					 "casualties": {"levy": 1}},
+					{"id": "p-2", "battle_id": "bat-9", "kingdom_id": null,
+					 "side": "defender", "army_id": null,
+					 "starting_composition": {"pikeman": 5},
+					 "ending_composition": {"pikeman": 3},
+					 "casualties": {"pikeman": 2}}
 				]
 			}`))
 		},
@@ -214,10 +219,12 @@ func TestRunBattleShow_wildernessRendersMarker(t *testing.T) {
 	require.Contains(t, got, "Battle bat-9")
 	require.Contains(t, got, "loot:       (none)")
 	require.Contains(t, got, "attacker  kgd-1 (you)")
-	// Single participant means only the attacker side renders; the
-	// wilderness marker shows up in the list, not here. Sanity-check
-	// that the rendered output doesn't accidentally show "(wilderness)
-	// (you)" on the caller.
+	// The wild defender participant has kingdom_id=null and army_id=null
+	// (a wilderness hoard with no kingdom). It must decode without error
+	// and render with the wilderness marker and a dash for the army.
+	require.Contains(t, got, "defender  (wilderness)")
+	require.Contains(t, got, "army=—")
+	// The caller never collapses to the wilderness marker.
 	require.NotContains(t, got, "(wilderness) (you)")
 }
 

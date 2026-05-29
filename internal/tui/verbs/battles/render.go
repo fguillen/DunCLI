@@ -164,8 +164,9 @@ func printBattleDetail(sess *shell.Session, b *gen.Battle, parts []gen.BattlePar
 	participantLines := make([]string, 0, len(parts)*4)
 	ordered := orderParticipants(parts)
 	for _, p := range ordered {
-		who := shortKingdom(p.KingdomID)
-		if p.KingdomID == callerKingdomID && callerKingdomID != "" {
+		kid, _ := p.KingdomID.Get()
+		who := shortKingdom(kid)
+		if kid == callerKingdomID && callerKingdomID != "" {
 			who = who + " (you)"
 		}
 		armyID := "—"
@@ -225,7 +226,9 @@ func orderParticipants(parts []gen.BattleParticipant) []gen.BattleParticipant {
 		if out[i].Side != out[j].Side {
 			return out[i].Side == gen.BattleParticipantSideAttacker
 		}
-		return out[i].KingdomID < out[j].KingdomID
+		ki, _ := out[i].KingdomID.Get()
+		kj, _ := out[j].KingdomID.Get()
+		return ki < kj
 	})
 	return out
 }

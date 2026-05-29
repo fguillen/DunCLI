@@ -456,7 +456,12 @@ func TestClient_ShowBattle_decodesParticipants(t *testing.T) {
 			 "side": "attacker",
 			 "starting_composition": {"levy": 10},
 			 "ending_composition": {"levy": 9},
-			 "casualties": {"levy": 1}}
+			 "casualties": {"levy": 1}},
+			{"id": "p-2", "battle_id": "bat-9", "kingdom_id": null,
+			 "side": "defender", "army_id": null,
+			 "starting_composition": {"pikeman": 5},
+			 "ending_composition": {"pikeman": 3},
+			 "casualties": {"pikeman": 2}}
 		]}`)
 	})
 
@@ -466,8 +471,13 @@ func TestClient_ShowBattle_decodesParticipants(t *testing.T) {
 	require.Equal(t, "bat-9", battle.ID)
 	_, ok := battle.DefenderKingdomID.Get()
 	require.False(t, ok, "wilderness battle has no defender (null)")
-	require.Len(t, parts, 1)
+	require.Len(t, parts, 2)
 	require.Equal(t, gen.BattleParticipantSideAttacker, parts[0].Side)
+	// The wild defender participant carries null kingdom_id/army_id and
+	// must decode to an unset OptNilString rather than failing the parse.
+	require.Equal(t, gen.BattleParticipantSideDefender, parts[1].Side)
+	_, ok = parts[1].KingdomID.Get()
+	require.False(t, ok, "wilderness defender participant has null kingdom_id")
 }
 
 func TestClient_ShowBattle_404Envelope(t *testing.T) {

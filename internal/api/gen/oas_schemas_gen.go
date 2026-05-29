@@ -1015,7 +1015,7 @@ func (s *BattleOutcome) UnmarshalText(data []byte) error {
 type BattleParticipant struct {
 	ID                  string                `json:"id"`
 	BattleID            string                `json:"battle_id"`
-	KingdomID           string                `json:"kingdom_id"`
+	KingdomID           OptNilString          `json:"kingdom_id"`
 	ArmyID              OptNilString          `json:"army_id"`
 	Side                BattleParticipantSide `json:"side"`
 	StartingComposition Composition           `json:"starting_composition"`
@@ -1034,7 +1034,7 @@ func (s *BattleParticipant) GetBattleID() string {
 }
 
 // GetKingdomID returns the value of KingdomID.
-func (s *BattleParticipant) GetKingdomID() string {
+func (s *BattleParticipant) GetKingdomID() OptNilString {
 	return s.KingdomID
 }
 
@@ -1074,7 +1074,7 @@ func (s *BattleParticipant) SetBattleID(val string) {
 }
 
 // SetKingdomID sets the value of KingdomID.
-func (s *BattleParticipant) SetKingdomID(val string) {
+func (s *BattleParticipant) SetKingdomID(val OptNilString) {
 	s.KingdomID = val
 }
 
@@ -5502,10 +5502,10 @@ type Node struct {
 	// reserved for its home kingdom: only that kingdom may capture it, and once owned it can never be
 	// seized (other kingdoms' captures are rejected with `home_hoard_protected`).
 	IsHomeHoard    bool         `json:"is_home_hoard"`
-	BaseRate       OptInt       `json:"base_rate"`
 	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
 	// Handle of the owning kingdom's player. Null when the node is wilderness.
 	OwnerHandle OptNilString `json:"owner_handle"`
+	BaseRate    OptInt       `json:"base_rate"`
 	RegionID    OptString    `json:"region_id"`
 	RegionName  OptString    `json:"region_name"`
 	// Wilderness garrison composition. Empty hash after capture (one-time per §16.5).
@@ -5532,11 +5532,6 @@ func (s *Node) GetIsHomeHoard() bool {
 	return s.IsHomeHoard
 }
 
-// GetBaseRate returns the value of BaseRate.
-func (s *Node) GetBaseRate() OptInt {
-	return s.BaseRate
-}
-
 // GetOwnerKingdomID returns the value of OwnerKingdomID.
 func (s *Node) GetOwnerKingdomID() OptNilString {
 	return s.OwnerKingdomID
@@ -5545,6 +5540,11 @@ func (s *Node) GetOwnerKingdomID() OptNilString {
 // GetOwnerHandle returns the value of OwnerHandle.
 func (s *Node) GetOwnerHandle() OptNilString {
 	return s.OwnerHandle
+}
+
+// GetBaseRate returns the value of BaseRate.
+func (s *Node) GetBaseRate() OptInt {
+	return s.BaseRate
 }
 
 // GetRegionID returns the value of RegionID.
@@ -5582,11 +5582,6 @@ func (s *Node) SetIsHomeHoard(val bool) {
 	s.IsHomeHoard = val
 }
 
-// SetBaseRate sets the value of BaseRate.
-func (s *Node) SetBaseRate(val OptInt) {
-	s.BaseRate = val
-}
-
 // SetOwnerKingdomID sets the value of OwnerKingdomID.
 func (s *Node) SetOwnerKingdomID(val OptNilString) {
 	s.OwnerKingdomID = val
@@ -5595,6 +5590,11 @@ func (s *Node) SetOwnerKingdomID(val OptNilString) {
 // SetOwnerHandle sets the value of OwnerHandle.
 func (s *Node) SetOwnerHandle(val OptNilString) {
 	s.OwnerHandle = val
+}
+
+// SetBaseRate sets the value of BaseRate.
+func (s *Node) SetBaseRate(val OptInt) {
+	s.BaseRate = val
 }
 
 // SetRegionID sets the value of RegionID.
@@ -5687,7 +5687,10 @@ type NodeSummary struct {
 	// True for the resource node placed in a kingdom's spawn region. A home-hoard is permanently
 	// reserved for its home kingdom: only that kingdom may capture it, and once owned it can never be
 	// seized (other kingdoms' captures are rejected with `home_hoard_protected`).
-	IsHomeHoard bool `json:"is_home_hoard"`
+	IsHomeHoard    bool         `json:"is_home_hoard"`
+	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
+	// Handle of the owning kingdom's player. Null when the node is wilderness.
+	OwnerHandle OptNilString `json:"owner_handle"`
 }
 
 // GetID returns the value of ID.
@@ -5710,6 +5713,16 @@ func (s *NodeSummary) GetIsHomeHoard() bool {
 	return s.IsHomeHoard
 }
 
+// GetOwnerKingdomID returns the value of OwnerKingdomID.
+func (s *NodeSummary) GetOwnerKingdomID() OptNilString {
+	return s.OwnerKingdomID
+}
+
+// GetOwnerHandle returns the value of OwnerHandle.
+func (s *NodeSummary) GetOwnerHandle() OptNilString {
+	return s.OwnerHandle
+}
+
 // SetID sets the value of ID.
 func (s *NodeSummary) SetID(val string) {
 	s.ID = val
@@ -5728,6 +5741,16 @@ func (s *NodeSummary) SetTier(val NodeSummaryTier) {
 // SetIsHomeHoard sets the value of IsHomeHoard.
 func (s *NodeSummary) SetIsHomeHoard(val bool) {
 	s.IsHomeHoard = val
+}
+
+// SetOwnerKingdomID sets the value of OwnerKingdomID.
+func (s *NodeSummary) SetOwnerKingdomID(val OptNilString) {
+	s.OwnerKingdomID = val
+}
+
+// SetOwnerHandle sets the value of OwnerHandle.
+func (s *NodeSummary) SetOwnerHandle(val OptNilString) {
+	s.OwnerHandle = val
 }
 
 type NodeSummaryResource string
@@ -8046,7 +8069,9 @@ type Region struct {
 	Adjacency     []string      `json:"adjacency"`
 	Nodes         []Node        `json:"nodes"`
 	Ruin          OptNilRuin    `json:"ruin"`
-	// Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+	// Kingdom that owns this region. For a region with a home-hoard node this is that node's owner;
+	// otherwise it is the kingdom owning the region's node(s). Null when unclaimed or contested (nodes
+	// owned by different kingdoms).
 	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
 	// Handle of the owning kingdom's player. Null when the region is unclaimed.
 	OwnerHandle OptNilString `json:"owner_handle"`
@@ -8237,7 +8262,9 @@ type RegionSummary struct {
 	IsHub         OptBool              `json:"is_hub"`
 	SpawnEligible OptBool              `json:"spawn_eligible"`
 	YourSpawn     OptBool              `json:"your_spawn"`
-	// Kingdom that holds this region's home-hoard node. Null when the region is unclaimed.
+	// Kingdom that owns this region. For a region with a home-hoard node this is that node's owner;
+	// otherwise it is the kingdom owning the region's node(s). Null when unclaimed or contested (nodes
+	// owned by different kingdoms).
 	OwnerKingdomID OptNilString `json:"owner_kingdom_id"`
 	// Handle of the owning kingdom's player. Null when the region is unclaimed.
 	OwnerHandle OptNilString      `json:"owner_handle"`

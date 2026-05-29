@@ -1893,8 +1893,10 @@ func (s *BattleParticipant) encodeFields(e *jx.Encoder) {
 		e.Str(s.BattleID)
 	}
 	{
-		e.FieldStart("kingdom_id")
-		e.Str(s.KingdomID)
+		if s.KingdomID.Set {
+			e.FieldStart("kingdom_id")
+			s.KingdomID.Encode(e)
+		}
 	}
 	{
 		if s.ArmyID.Set {
@@ -1965,11 +1967,9 @@ func (s *BattleParticipant) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"battle_id\"")
 			}
 		case "kingdom_id":
-			requiredBitSet[0] |= 1 << 2
 			if err := func() error {
-				v, err := d.Str()
-				s.KingdomID = string(v)
-				if err != nil {
+				s.KingdomID.Reset()
+				if err := s.KingdomID.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -2036,7 +2036,7 @@ func (s *BattleParticipant) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b11110111,
+		0b11110011,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -15316,12 +15316,6 @@ func (s *Node) encodeFields(e *jx.Encoder) {
 		e.Bool(s.IsHomeHoard)
 	}
 	{
-		if s.BaseRate.Set {
-			e.FieldStart("base_rate")
-			s.BaseRate.Encode(e)
-		}
-	}
-	{
 		if s.OwnerKingdomID.Set {
 			e.FieldStart("owner_kingdom_id")
 			s.OwnerKingdomID.Encode(e)
@@ -15331,6 +15325,12 @@ func (s *Node) encodeFields(e *jx.Encoder) {
 		if s.OwnerHandle.Set {
 			e.FieldStart("owner_handle")
 			s.OwnerHandle.Encode(e)
+		}
+	}
+	{
+		if s.BaseRate.Set {
+			e.FieldStart("base_rate")
+			s.BaseRate.Encode(e)
 		}
 	}
 	{
@@ -15358,9 +15358,9 @@ var jsonFieldsNameOfNode = [10]string{
 	1: "resource",
 	2: "tier",
 	3: "is_home_hoard",
-	4: "base_rate",
-	5: "owner_kingdom_id",
-	6: "owner_handle",
+	4: "owner_kingdom_id",
+	5: "owner_handle",
+	6: "base_rate",
 	7: "region_id",
 	8: "region_name",
 	9: "garrison",
@@ -15419,16 +15419,6 @@ func (s *Node) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"is_home_hoard\"")
 			}
-		case "base_rate":
-			if err := func() error {
-				s.BaseRate.Reset()
-				if err := s.BaseRate.Decode(d); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"base_rate\"")
-			}
 		case "owner_kingdom_id":
 			if err := func() error {
 				s.OwnerKingdomID.Reset()
@@ -15448,6 +15438,16 @@ func (s *Node) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"owner_handle\"")
+			}
+		case "base_rate":
+			if err := func() error {
+				s.BaseRate.Reset()
+				if err := s.BaseRate.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"base_rate\"")
 			}
 		case "region_id":
 			if err := func() error {
@@ -15661,13 +15661,27 @@ func (s *NodeSummary) encodeFields(e *jx.Encoder) {
 		e.FieldStart("is_home_hoard")
 		e.Bool(s.IsHomeHoard)
 	}
+	{
+		if s.OwnerKingdomID.Set {
+			e.FieldStart("owner_kingdom_id")
+			s.OwnerKingdomID.Encode(e)
+		}
+	}
+	{
+		if s.OwnerHandle.Set {
+			e.FieldStart("owner_handle")
+			s.OwnerHandle.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfNodeSummary = [4]string{
+var jsonFieldsNameOfNodeSummary = [6]string{
 	0: "id",
 	1: "resource",
 	2: "tier",
 	3: "is_home_hoard",
+	4: "owner_kingdom_id",
+	5: "owner_handle",
 }
 
 // Decode decodes NodeSummary from json.
@@ -15722,6 +15736,26 @@ func (s *NodeSummary) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"is_home_hoard\"")
+			}
+		case "owner_kingdom_id":
+			if err := func() error {
+				s.OwnerKingdomID.Reset()
+				if err := s.OwnerKingdomID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"owner_kingdom_id\"")
+			}
+		case "owner_handle":
+			if err := func() error {
+				s.OwnerHandle.Reset()
+				if err := s.OwnerHandle.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"owner_handle\"")
 			}
 		default:
 			return d.Skip()

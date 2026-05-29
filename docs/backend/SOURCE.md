@@ -1,7 +1,7 @@
 # Backend docs snapshot
 
 Mirrored from **https://github.com/fguillen/dun** at ref `main`
-on 2026-05-29 21:20:24Z.
+on 2026-05-29 23:44:40Z.
 
 Refresh with `./scripts/sync-backend-docs.sh` (set `DUN_REF` to pin).
 
